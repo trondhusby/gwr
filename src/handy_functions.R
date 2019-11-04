@@ -46,6 +46,7 @@ fmla_lm <- function(dep_var, ind_var) {
 
 ## generic formula regression formula ols and glm
 fmla <- function(vars, mod) {
+<<<<<<< HEAD
     if (grepl('ols', mod)) {
         ind_vars <- paste0('V_', vars[-1])
         dep_var <- paste0('V_', vars[1])
@@ -58,6 +59,17 @@ fmla <- function(vars, mod) {
         ind_vars <- paste0('log(', vars[-1], ')')
         dep_var <- paste0(vars[1], '_int')
         formula <- paste(ind_vars, collapse = ' + ')
+=======
+    if (mod == 'ols') {
+        ind_vars <- paste0('V_', vars[-1])
+        dep_var <- paste0('V_', vars[1])
+        formula <- paste(paste(ind_vars, collapse = ' + '), '- 1')
+    } else {
+        ind_vars <- paste0('log(', vars[-1], ')')
+        dep_var <- paste0(vars[1], '_int')
+        ##formula <- paste(ind_vars, collapse = ' + ')
+        formula <- paste(paste(ind_vars, collapse = ' + '), ' + factor(code_orig) - 1')
+>>>>>>> master
     }
     return(paste(dep_var, formula, sep = ' ~ '))
 }
@@ -165,6 +177,7 @@ int_trs <- function(x){
   dimnames(xint) <- dimnames(x)
   xint
 }
+<<<<<<< HEAD
 
 ## function for recoding municipalities
 recode_mun <- function(dat, var_name, in_year, out_year) {
@@ -211,3 +224,5 @@ recode_mun_vars <- function(dat,vars, in_year, out_year) {
     }
     return(out)
 }
+=======
+>>>>>>> master

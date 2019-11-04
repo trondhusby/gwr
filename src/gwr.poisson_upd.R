@@ -345,8 +345,11 @@ ggwr.basic2 <-function(formula, data, regression.points, bw, family ="poisson", 
         res1<-gwr.nbinomial.fe(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol, maxiter, theta_spec = 'global', theta_g=theta_g, null.dev=null.dev)
     else if(family=="nbinomial.fe.fixed")
         res1<-gwr.nbinomial.fe(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol, maxiter, theta_spec = 'fixed')
+<<<<<<< HEAD
     else if(family=="nbinomial.con")
         res1<-gwr.nbinomial.con(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol, maxiter)    
+=======
+>>>>>>> master
     ####################################
     CV <- numeric(dp.n)
     if(hatmatrix && cv)
@@ -668,6 +671,7 @@ llik.nbinom <- function(theta_i, mu_i, y_i) {
           log(mu_i + (y_i == 0)) - (theta_i + y_i) * log(theta_i + mu_i)))
 }
 
+<<<<<<< HEAD
 bal_obj_fn <- function(y_i, x0, x_i, betas_i) {
     sum((y_i - exp(x0*betas_i[1] + x_i %*% betas_i[-1]))^2)
 }
@@ -943,6 +947,11 @@ gwr.nbinomial.con <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=
 }
 
 gwr.nbinomial.fe <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e-5, maxiter=500, fe.col = 1, theta_g = 1, null.dev = 1, theta_spec = 'local', fe.cutoff = 0) {
+=======
+
+gwr.nbinomial.fe <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e-5, maxiter=500, fe.col = 1, theta_g = 1, null.dev = 1, theta_spec = 'local', fe.cutoff = 0)
+{
+>>>>>>> master
     p4s <- as.character(NA)
     if (is(regression.points, "Spatial"))
     {
@@ -1170,7 +1179,11 @@ gwr.nbinomial.fe <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1
         SDF <- SpatialPointsDataFrame(coords=rp.locat, data=gwres.df, proj4string=CRS(p4s), match.ID=F)
    ##############
     if(hatmatrix)
+<<<<<<< HEAD
       res<-list(GW.diagnostic=GW.diagnostic,glms=alpha,SDF=SDF)
+=======
+      res<-list(GW.diagnostic=GW.diagnostic,glms=glms,SDF=SDF)
+>>>>>>> master
     else
       res <- list(glms=alpha,SDF=SDF)
 }

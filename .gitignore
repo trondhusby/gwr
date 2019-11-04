@@ -1,6 +1,12 @@
+<<<<<<< HEAD
 credentials.json
 *.RData
 *.Rdata
 *.Rds
 *.rds
 *.rdata
+=======
+*.RData
+*.Rdata
+*.Rds
+>>>>>>> master

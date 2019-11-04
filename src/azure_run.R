@@ -53,7 +53,11 @@ load('../output/sp_dt.Rdata')
 ## testing on a subset (comment out for full)
 sp_dt <- subset(sp_dt, dist <= 35)
 ##sp_dt <- subset(sp_dt, code_orig == unique(sp_dt@data$code_orig)[c(1,2)])
+<<<<<<< HEAD
 sp_dt <- subset(sp_dt, prov_nm %in% unique(sp_dt@data$prov_nm)[c(1:3)])
+=======
+##sp_dt <- subset(sp_dt, prov_nm %in% unique(sp_dt@data$prov_nm)[c(1:3)])
+>>>>>>> master
 
 ## add index and fold
 set.seed(123)
@@ -99,24 +103,42 @@ for (i in 1:4) {
 }
 
 ## combination of band width and model type
+<<<<<<< HEAD
 ## mods_bw <- expand.grid(seq(140, 200, by = 1),
 ##                         c(5, 11, 12, 15)
 ##                         )
 
 ## for bisquare
 mods_bw <- expand.grid(seq(300, 360, by = 1),
+=======
+mods_bw <- expand.grid(seq(50, 200, by = 5),
+                        c(5, 11, 12, 15)
+                        )
+
+## for bisquare
+mods_bw <- expand.grid(seq(200, 600, by = 10),
+>>>>>>> master
                          c(5, 11, 12, 15)
                         )
 
 
 ## check residuals and obtain parameters with non-gwr model
+<<<<<<< HEAD
 ## glm_global <- glm(fmla(model_vars, 'mle'), 'poisson', sp_dt@data) 
 ## glm.nb_global <- glm.nb(fmla(model_vars, 'mle'), sp_dt@data) 
+=======
+glm_global <- glm(fmla(model_vars, 'mle'), 'poisson', sp_dt@data) 
+glm.nb_global <- glm.nb(fmla(model_vars, 'mle'), sp_dt@data) 
+>>>>>>> master
 ## summary(data.table(cbind(sp_dt@data$V1_int, fitted(test1)))[, V1 - V2])
 ## summary(data.table(cbind(sp_dt@data$V1_int, fitted(test2)))[, V1 - V2])
 
 ## azure options create name, prevent R session from being open and waiting for results
+<<<<<<< HEAD
 my_job_id <- "full-run-poisson-nbinomial"
+=======
+my_job_id <- "gwr-nbionom-42"
+>>>>>>> master
 #setAutoDeleteJob(TRUE)
 opt <- list(job = my_job_id, wait = FALSE, autoDeleteJob = TRUE, enableCloudCombine = FALSE, maxTaskRetryCount = 1)
 
@@ -124,6 +146,7 @@ opt <- list(job = my_job_id, wait = FALSE, autoDeleteJob = TRUE, enableCloudComb
 euclidian_distance <- TRUE
 
 ## 10-fold cross validation or not
+<<<<<<< HEAD
 cv_run <- FALSE
 
 bal_obj_fn(y_i = y_test[gwr.same[[1]]],
@@ -161,6 +184,17 @@ job_id <- foreach(
 ) %do% {
     ## set model type
     k = as.numeric(row.names(mods_bw))
+=======
+cv_run <- TRUE
+
+job_id <- foreach(
+    ## index for adjusting
+    k = as.numeric(row.names(mods_bw)),
+    .packages = c('sp', 'raster', 'GWmodel'),
+    .options.azure = opt
+) %dopar% {
+    mdl = c('poisson.fe', 'nbinomial.fe', 'nbinomial.fe.global', 'nbinomial.fe.fixed')[1]    
+>>>>>>> master
     ## set kernel type
     j = c('gaussian', 'bisquare', 'tricube', 'boxcar')[2]
     ## set model type
@@ -195,7 +229,11 @@ job_id <- foreach(
         message(paste('Calculate BW OLS, time:', Sys.time()))
         best_bw <- NULL
         best_bw <- tryCatch({
+<<<<<<< HEAD
             bw.gwr(fmla(model_vars, mdl),
+=======
+            bw.gwr(fmla(model_vars, i),
+>>>>>>> master
                    data = sp_dt, adaptive = T, dMat = dist_m,
                    approach = 'CV', kernel = j)
         },
@@ -232,7 +270,11 @@ job_id <- foreach(
     if (i == 'ols') {
         message(paste('Run GWR OLS, time:', Sys.time()))
         mod <- tryCatch({
+<<<<<<< HEAD
             gwr.basic(fmla(model_vars, mdl),
+=======
+            gwr.basic(fmla(model_vars, i),
+>>>>>>> master
                       data=sp_dt, bw = best_bw, dMat = dist_m,
                       kernel = j, adaptive = T)
         },
@@ -243,7 +285,11 @@ job_id <- foreach(
         mod <- tryCatch({
             if (cv_run) {
                 model_vars_sub <- c(model_vars[1], mods[[mods_bw[k, 2]]])
+<<<<<<< HEAD
                 message(paste('Estimating model', fmla(model_vars_sub, mdl), '\n Bandwith', best_bw))
+=======
+                message(paste('Estimating model', fmla(model_vars_sub, i), '\n Bandwith', best_bw))
+>>>>>>> master
                 ## initiation
                 out <- list()
                 vars <- list()
@@ -253,12 +299,21 @@ job_id <- foreach(
                     ## training data set
                     train <- subset(sp_dt, fold_i != fld)
                     ## estimate gwr model on training data
+<<<<<<< HEAD
                     out[[fld]] <- ggwr.basic2(fmla(model_vars_sub, mdl),
                                        data = train, bw = best_bw,
                                        dMat = dist_m[train@data$index, train@data$index],
                                        kernel = j, adaptive = T,
                                        cv = F, family = mdl, no.hatmatrix = TRUE,
                                        theta_g = glm.nb_global$theta, null.dev = glm.nb_global$null.deviance
+=======
+                    out[[fld]] <- ggwr.basic2(fmla(model_vars_sub, i),
+                                       data = train, bw = best_bw,
+                                       dMat = dist_m[train@data$index, train@data$index],
+                                       kernel = j, adaptive = T,
+                                       cv = F, family = mdl, no.hatmatrix = TRUE
+                         #              theta_g = glm.nb_global$theta, null.dev = glm.nb_global$null.deviance
+>>>>>>> master
                                        )$SDF@data                    
                     ## gather parameters for each municipality 
                     params[[fld]] <- unique(cbind(code_orig = train@data$code_orig,
@@ -272,6 +327,7 @@ job_id <- foreach(
                                       )
                 }                
             } else {
+<<<<<<< HEAD
                 #message(paste('Estimating model', fmla(model_vars_sub, i)))
                 if (mdl == 'poisson.fe') {
                     model_vars_sub <- c(model_vars[1], mods[[15]])
@@ -289,21 +345,36 @@ job_id <- foreach(
                        )
                 }
             }
+=======
+                    ggwr.basic2(fmla(model_vars, i),
+                       data=sp_dt, bw = best_bw, dMat = dist_m, maxiter = 50,
+                       kernel = j, adaptive = T, family = mdl, cv = F
+                       )
+                }
+>>>>>>> master
         },
         error = function(e) message(paste0('Error in GWR MLE estimation:', e))
         )
     }
     message(paste('End:', Sys.time()))
     if (!cv_run) {
+<<<<<<< HEAD
         return(mod$SDF@data)        
     } else if (cv_run){
         return(list(out, params, k, best_bw, mods[[mods_bw[k, 2]]]))
    }
+=======
+        return(list(best_bw,mod$SDF@data,j))        
+    } else if (cv_run){
+        return(list(out, params, k, best_bw, mods[[mods_bw[k, 2]]]))
+   }  
+>>>>>>> master
 }
 
 ## gather results
 result <- getJobResult(my_job_id)
 
+<<<<<<< HEAD
 saveRDS(result, file = '../output/gwr_poisson_nbinomial_result.rds')
 
 ## postprocessing of results from tuning
@@ -435,6 +506,58 @@ ggplot(rbindlist(pred_errors[[1]]), aes(V2, V4)) +
 
 
 result <- getJobResult("gwr-nbionom-47")
+=======
+## create model matrix for all 4 models
+dt2 <- lapply(unique(mods_bw$Var2),
+              function(x) {
+                  vars <- mods[[x]]
+                  frml <- paste0('~', paste(vars, collapse = '+'),
+                                 '+factor(code_orig)-1')
+                  data.table(model.matrix(as.formula(frml),
+                                                 data = sp_dt@data
+                                                 )
+                                    )[,
+                                      c(vars) := lapply(.SD, log),
+                                      .SDcols = c(vars)
+                                      ]
+              })
+
+## calculate mse and mae 
+pred_errors <- lapply(1:length(result),
+              function(x) {
+                  k <- result[[x]][[3]]
+                  dt_index <- which(unique(mods_bw$Var2) == mods_bw[k, 2])
+                  dt1 <- merge(data.table(sp_dt@data)[, c('code_orig', 'fold_i')],
+                               rbindlist(result[[x]][[2]]),
+                               by.x = c('code_orig',  'fold_i'),
+                               by.y = c('code_orig',  'fld')
+                               )                  
+                  return(
+                      data.table(predicted = exp(apply(dt1[,-c(1,2)] * dt2[[dt_index]], 1, sum)),
+                                 actual = sp_dt@data$V1_int,
+                                 fold = sp_dt@data$fold_i
+                                 )[,
+                                   .(mean((predicted - actual)^2),
+                                     mean(abs(predicted - actual))
+                                     ),
+                                   by = fold
+                                   ][,
+                                     .(k, mods_bw[k, 1], mods_bw[k, 2],
+                                       mean(V1), mean(V2)
+                                       )
+                                     ]
+                  )
+              }
+              #mc.cores = n_cores
+              )
+
+
+ggplot(rbindlist(pred_errors), aes(V2, V4)) +
+    geom_line(aes(col = factor(V3))) +
+    theme_bw()
+
+result <- getJobResult("gwr-nbionom-35")
+>>>>>>> master
 result2 <- getJobResult("gwr-nbionom-34")
 
 
@@ -472,7 +595,11 @@ saveRDS(result_osfit, file = '../output/gwr_results_sd_os_bw.rds')
 ## if download does not work...
 
 # List all of the blobs that start with result in container
+<<<<<<< HEAD
 files <- listStorageFiles("gwr-poisson-tuning", prefix = "result")
+=======
+files <- listStorageFiles("gwr-nbionom-40", prefix = "result")
+>>>>>>> master
 
 ## download files
 temp_dir <- tempdir(check=T)
