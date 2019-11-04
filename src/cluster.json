@@ -1,0 +1,33 @@
+{
+    "name": "gwr",
+    "vmSize": "Standard_F72s_v2",
+    "virtualMachineConfiguration": {
+        "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04-LTS",
+            "version": "latest"
+        },
+        "nodeAgentSKUId": "batch.node.ubuntu 16.04"
+    },
+    "maxTasksPerNode": 1,
+    "poolSize": {
+        "dedicatedNodes": {
+            "min": 0,
+            "max": 0
+        },
+        "lowPriorityNodes": {
+            "min": 1,
+            "max": 13
+        },
+        "autoscaleFormula": "QUEUE_AND_RUNNING"
+    },
+    "containerImage": "husbyt/custom-geospatial",
+    "rPackages": {
+        "cran": [],
+        "github": [],
+        "bioconductor": []
+    },
+    "commandLine": [], 
+    "subnetId": ""
+}

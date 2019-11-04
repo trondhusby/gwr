@@ -1,0 +1,33 @@
+{
+    "name": "gwr_results",
+    "vmSize": "Standard_E20_v2",
+    "virtualMachineConfiguration": {
+        "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04-LTS",
+            "version": "latest"
+        },
+        "nodeAgentSKUId": "batch.node.ubuntu 16.04"
+    },
+    "maxTasksPerNode": 1,
+    "poolSize": {
+        "dedicatedNodes": {
+            "min": 0,
+            "max": 0
+        },
+        "lowPriorityNodes": {
+            "min": 1,
+            "max": 1
+        },
+        "autoscaleFormula": "QUEUE_AND_RUNNING"
+    },
+    "containerImage": "husbyt/custom-geospatial",
+    "rPackages": {
+        "cran": [],
+        "github": [],
+        "bioconductor": []
+    },
+    "commandLine": [], 
+    "subnetId": ""
+}

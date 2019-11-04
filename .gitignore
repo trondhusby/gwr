@@ -1,0 +1,6 @@
+credentials.json
+*.RData
+*.Rdata
+*.Rds
+*.rds
+*.rdata
