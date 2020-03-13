@@ -3,6 +3,8 @@ library(sp)
 library(data.table)
 library(ggplot2)
 library(MASS)
+library(mpath)
+library(caret)
 
 ## vector of models
 mdl  <-  c('poisson.fe', 'nbinomial.fe', 'nbinomial.fe.global', 'nbinomial.fe.fixed')[1:2]
@@ -27,6 +29,8 @@ sp_dt <- subset(sp_dt, prov_nm %in% unique(sp_dt@data$prov_nm)[c(1:3)])
 
 ## load test data
 test_dt <- readRDS('output/test_dt.rds')[dist <= 35 & code_orig != code_dest]
+## subset
+test_dt <- subset(test_dt, prov_nm %in% unique(test_dt$prov_nm)[c(1:3)])
 
 summary(result[[1]][, "residual"])
 summary(result[[2]][, "residual"])
@@ -83,57 +87,6 @@ pred_errors <- lapply(mdl,
                         out$code_dest <- sp_dt@data$code_dest
                         return(out)
                     })
-
-## run global models
-glm_global <- glm(fmla(model_vars, 'mle'), 'poisson', sp_dt@data) 
-glm.nb_global <- glm.nb(fmla(model_vars[c(1,2,3)], 'mle'), sp_dt@data) 
-
-glm.nb_global2 <- glm.nb('V1_int ~ log(AANT_INW) + log(dist_rd) + factor(code_orig) + factor(code_dest)', sp_dt@data)
-
-inp_dt <- data.frame(sp_dt@data)
-correct_A <- aggregate(V1_int ~ code_orig,  data = sp_dt@data, sum)
-init_A <- data.frame(code_orig = unique(inp_dt$code_orig),
-                     A = runif(length(unique(inp_dt$code_orig)))
-                     )
-A <- list()
-
-inp_dt <- merge(inp_dt, aggregate(AANT_INW ~ code_orig, data = inp_dt, sum),
-                    by = 'code_orig')
-
-inp_dt <- merge(inp_dt, aggregate(dist_rd ~ code_orig, data = inp_dt, sum),
-                    by = 'code_orig')
-
-for (i in 1:3) {
-    print(i)
-    if (i == 1) {
-        tmp <- glm.nb(V1_int ~ log(AANT_INW.x/AANT_INW.y) + log(dist_rd.x/dist_rd.y) + log(A),
-                   ##family = 'poisson',
-                   data = merge(inp_dt, init_A, by = 'code_orig'))
-        A[[i]] <- aggregate(A ~ code_orig,
-                       data = data.frame(A = fitted(tmp), code_orig = inp_dt$code_orig),
-                       sum)
-        inp_dt$y.adj <- fitted(tmp)
-    } else {
-        tmp <- glm.nb(y.adj ~ log(AANT_INW.x/AANT_INW.y) + log(dist_rd.x/dist_rd.y) + log(A),
-                   ##family = 'poisson',
-                   merge(inp_dt, A[[i-1]], by = 'code_orig', all.x = T))
-        A[[i]] <- aggregate(A ~ code_orig,
-                       data = data.frame(A = fitted(tmp), code_orig = inp_dt$code_orig),
-                       sum)
-        inp_dt$y.adj <- fitted(tmp)
-    }
-}
-
-out <- rbindlist(lapply(1:3, function(x) {
-    data.frame(x, merge(A[[x]], correct_A, by = 'code_orig'))
-}))
-
-
-
-poisson_pred <- exp(predict(glm_global, newdata = test_dt))
-nbinomial_pred <- exp(predict(glm.nb_global, newdata = test_dt))
-rmse(poisson_pred, test_dt$V1_int)
-rmse(nbinomial_pred, test_dt$V1_int)
 
 out_rmse <- merge(pred_errors[[1]][, rmse(predicted, actual), by = code_orig],
                   pred_errors[[2]][, rmse(predicted, actual), by = code_orig],

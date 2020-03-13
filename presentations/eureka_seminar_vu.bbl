@@ -1,0 +1,186 @@
+% $ biblatex auxiliary file $
+% $ biblatex bbl format version 3.1 $
+% Do not modify the above lines!
+%
+% This is an auxiliary file used by the 'biblatex' package.
+% This file may safely be deleted. It will be recreated by
+% biber as required.
+%
+\begingroup
+\makeatletter
+\@ifundefined{ver@biblatex.sty}
+  {\@latex@error
+     {Missing 'biblatex' package}
+     {The bibliography requires the 'biblatex' package.}
+      \aftergroup\endinput}
+  {}
+\endgroup
+
+
+\refsection{0}
+  \datalist[entry]{nty/global//global/global}
+    \entry{davies1987statistical}{article}{}
+      \name{author}{2}{}{%
+        {{hash=2a17584a2715ce471c664e1ad715e6d8}{%
+           family={Davies},
+           familyi={D\bibinitperiod},
+           given={Richard\bibnamedelima B},
+           giveni={R\bibinitperiod\bibinitdelim B\bibinitperiod}}}%
+        {{hash=97759fee04afb7f346044549e2e15961}{%
+           family={Guy},
+           familyi={G\bibinitperiod},
+           given={Clifford\bibnamedelima M},
+           giveni={C\bibinitperiod\bibinitdelim M\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {Wiley Online Library}%
+      }
+      \strng{namehash}{7c8e58e8f425e430f875179beaa0a259}
+      \strng{fullhash}{7c8e58e8f425e430f875179beaa0a259}
+      \strng{bibnamehash}{7c8e58e8f425e430f875179beaa0a259}
+      \strng{authorbibnamehash}{7c8e58e8f425e430f875179beaa0a259}
+      \strng{authornamehash}{7c8e58e8f425e430f875179beaa0a259}
+      \strng{authorfullhash}{7c8e58e8f425e430f875179beaa0a259}
+      \field{sortinit}{D}
+      \field{sortinithash}{c438b3d5d027251ba63f5ed538d98af5}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{year}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{Geographical Analysis}
+      \field{number}{4}
+      \field{title}{The statistical modeling of flow data when the Poisson assumption is violated}
+      \field{volume}{19}
+      \field{year}{1987}
+      \field{pages}{300\bibrangedash 314}
+      \range{pages}{15}
+    \endentry
+    \entry{luxen-vetter-2011}{inproceedings}{}
+      \name{author}{2}{}{%
+        {{hash=c39b75997fba2969cf9ffeccc6176e97}{%
+           family={Luxen},
+           familyi={L\bibinitperiod},
+           given={Dennis},
+           giveni={D\bibinitperiod}}}%
+        {{hash=b84a32e29c57604b46ef3ae4cf7ba6ab}{%
+           family={Vetter},
+           familyi={V\bibinitperiod},
+           given={Christian},
+           giveni={C\bibinitperiod}}}%
+      }
+      \list{location}{1}{%
+        {Chicago, Illinois}%
+      }
+      \list{publisher}{1}{%
+        {ACM}%
+      }
+      \strng{namehash}{097fad2cb4654f4012500037905f5b22}
+      \strng{fullhash}{097fad2cb4654f4012500037905f5b22}
+      \strng{bibnamehash}{097fad2cb4654f4012500037905f5b22}
+      \strng{authorbibnamehash}{097fad2cb4654f4012500037905f5b22}
+      \strng{authornamehash}{097fad2cb4654f4012500037905f5b22}
+      \strng{authorfullhash}{097fad2cb4654f4012500037905f5b22}
+      \field{sortinit}{L}
+      \field{sortinithash}{dad3efd0836470093a7b4a7bb756eb8c}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{year}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{Proceedings of the 19th ACM SIGSPATIAL International Conference on Advances in Geographic Information Systems}
+      \field{isbn}{978-1-4503-1031-4}
+      \field{series}{GIS '11}
+      \field{title}{Real-time routing with OpenStreetMap data}
+      \field{year}{2011}
+      \field{pages}{513\bibrangedash 516}
+      \range{pages}{4}
+      \verb{doi}
+      \verb 10.1145/2093973.2094062
+      \endverb
+      \verb{urlraw}
+      \verb http://doi.acm.org/10.1145/2093973.2094062
+      \endverb
+      \verb{url}
+      \verb http://doi.acm.org/10.1145/2093973.2094062
+      \endverb
+    \endentry
+    \entry{nakaya2001local}{article}{}
+      \name{author}{1}{}{%
+        {{hash=9799a934dc3537f895ee85cf87e8d00a}{%
+           family={Nakaya},
+           familyi={N\bibinitperiod},
+           given={Tomoki},
+           giveni={T\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {JSTOR}%
+      }
+      \strng{namehash}{9799a934dc3537f895ee85cf87e8d00a}
+      \strng{fullhash}{9799a934dc3537f895ee85cf87e8d00a}
+      \strng{bibnamehash}{9799a934dc3537f895ee85cf87e8d00a}
+      \strng{authorbibnamehash}{9799a934dc3537f895ee85cf87e8d00a}
+      \strng{authornamehash}{9799a934dc3537f895ee85cf87e8d00a}
+      \strng{authorfullhash}{9799a934dc3537f895ee85cf87e8d00a}
+      \field{sortinit}{N}
+      \field{sortinithash}{98cf339a479c0454fe09153a08675a15}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{year}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{GeoJournal}
+      \field{number}{4}
+      \field{title}{Local spatial interaction modelling based on the geographically weighted regression approach}
+      \field{volume}{53}
+      \field{year}{2001}
+      \field{pages}{347\bibrangedash 358}
+      \range{pages}{12}
+    \endentry
+    \entry{nakaya2005geographically}{article}{}
+      \name{author}{4}{}{%
+        {{hash=9799a934dc3537f895ee85cf87e8d00a}{%
+           family={Nakaya},
+           familyi={N\bibinitperiod},
+           given={Tomoki},
+           giveni={T\bibinitperiod}}}%
+        {{hash=558a0339ef9faf2c6cd3b3c736207b4d}{%
+           family={Fotheringham},
+           familyi={F\bibinitperiod},
+           given={Alexander\bibnamedelima S},
+           giveni={A\bibinitperiod\bibinitdelim S\bibinitperiod}}}%
+        {{hash=98a0d3717c90f41d9846124c798cbfc3}{%
+           family={Brunsdon},
+           familyi={B\bibinitperiod},
+           given={Chris},
+           giveni={C\bibinitperiod}}}%
+        {{hash=18e010ad6f178bf5db6f777026b33739}{%
+           family={Charlton},
+           familyi={C\bibinitperiod},
+           given={Martin},
+           giveni={M\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {Wiley Online Library}%
+      }
+      \strng{namehash}{14954c78bc60ded795609e21a73d07b9}
+      \strng{fullhash}{f3b4fdc3542cb862488932461a748db1}
+      \strng{bibnamehash}{f3b4fdc3542cb862488932461a748db1}
+      \strng{authorbibnamehash}{f3b4fdc3542cb862488932461a748db1}
+      \strng{authornamehash}{14954c78bc60ded795609e21a73d07b9}
+      \strng{authorfullhash}{f3b4fdc3542cb862488932461a748db1}
+      \field{sortinit}{N}
+      \field{sortinithash}{98cf339a479c0454fe09153a08675a15}
+      \field{extradatescope}{labelyear}
+      \field{labeldatesource}{year}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{Statistics in medicine}
+      \field{number}{17}
+      \field{title}{Geographically weighted Poisson regression for disease association mapping}
+      \field{volume}{24}
+      \field{year}{2005}
+      \field{pages}{2695\bibrangedash 2717}
+      \range{pages}{23}
+    \endentry
+  \enddatalist
+\endrefsection
+\endinput
+

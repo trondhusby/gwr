@@ -11,6 +11,10 @@ mae <- function(m, o) {
     mean(abs(m - o))
 }
 
+mape <- function(dat, pred) {
+    mean(abs((dat - pred) / dat))
+}
+
 ploss <- function(m, o) {
     mean(o - m*log(o))
 }
@@ -27,9 +31,14 @@ gravity_vars <- function(vars, mod = 'ols') {
         parms <- paste('i.V', vars, sep = '_')
         vars <- paste('V', vars, sep = '_')
         out <- paste(parms, vars, sep = '*', collapse = '+')
+    } else if (mod == 'mle_cv') {
+        parms <- paste('V', vars, sep = '_')
+        out <- paste(parms, vars, sep = '*', collapse = '+')
     }
     return(out)
 }
+
+
 
 ## check global collinearity
 BKWcn <- function(X) {
@@ -45,31 +54,23 @@ fmla_lm <- function(dep_var, ind_var) {
 }
 
 ## generic formula regression formula ols and glm
-fmla <- function(vars, mod) {
-<<<<<<< HEAD
+fmla <- function(vars, mod = 'generic') {
     if (grepl('ols', mod)) {
         ind_vars <- paste0('V_', vars[-1])
         dep_var <- paste0('V_', vars[1])
         formula <- paste(paste(ind_vars, collapse = ' + '), '- 1')
-    } else if (grepl('poisson', mod)) {
+    } else if (mod %in% c('poisson.fe', 'nbinomial.fe')) {
         ind_vars <- paste0('log(', vars[-1], ')')
         dep_var <- paste0(vars[1], '_int')
-        formula <- paste(paste(ind_vars, collapse = ' + '), ' + factor(code_orig) - 1')
-    } else if (grepl('nbinomial', mod)) {
+        formula <- paste(paste(ind_vars, collapse = ' + '), '  + factor(code_orig) - 1')
+    } else if (mod %in% c('poisson', 'nbinomial')) {
         ind_vars <- paste0('log(', vars[-1], ')')
         dep_var <- paste0(vars[1], '_int')
-        formula <- paste(ind_vars, collapse = ' + ')
-=======
-    if (mod == 'ols') {
-        ind_vars <- paste0('V_', vars[-1])
-        dep_var <- paste0('V_', vars[1])
-        formula <- paste(paste(ind_vars, collapse = ' + '), '- 1')
+        formula <- paste(paste(ind_vars, collapse = ' + '))
     } else {
-        ind_vars <- paste0('log(', vars[-1], ')')
-        dep_var <- paste0(vars[1], '_int')
-        ##formula <- paste(ind_vars, collapse = ' + ')
-        formula <- paste(paste(ind_vars, collapse = ' + '), ' + factor(code_orig) - 1')
->>>>>>> master
+        ind_vars <- vars[-1]
+        dep_var <- vars[1]
+        formula <- paste(paste(ind_vars, collapse = ' + '), ' - 1')
     }
     return(paste(dep_var, formula, sep = ' ~ '))
 }
@@ -106,6 +107,22 @@ run_prov_regression <- function(prov) {
     dt_test$pred <- predict(m_fit, dt_test)
     srmse <- (1/sum(dt_test$V_V1))*rmse(dt_test$pred, dt_test$V1) 
     return(list(prov, var_importance, srmse))
+}
+
+## helper function to plug in gravity constraints
+gravity_constraints <- function(parm, vars) {
+    if (length(parm) != length(vars)) {
+        stop('Par and var vector of unequal length')
+    } else {
+        paste(unlist(lapply(1:length(vars),
+                            function(x) {
+                                paste0(vars[x],
+                                '^',
+                                parm[x]
+                                )}
+                            )),
+                     collapse = '*')
+    }
 }
 
 ## gravity regression function
@@ -177,7 +194,6 @@ int_trs <- function(x){
   dimnames(xint) <- dimnames(x)
   xint
 }
-<<<<<<< HEAD
 
 ## function for recoding municipalities
 recode_mun <- function(dat, var_name, in_year, out_year) {
@@ -224,5 +240,54 @@ recode_mun_vars <- function(dat,vars, in_year, out_year) {
     }
     return(out)
 }
-=======
->>>>>>> master
+
+pred_fn <- function(dat, pars) {   
+    setkey(dat, code_orig, code_dest)
+    setkey(pars, code_orig, code_dest)
+    ivars <- unlist(lapply(names(pars), function(x) grep('log', x, value = T)))
+    setnames(pars,
+             ivars,
+             gsub('log\\(', 'V_', gsub('\\)', '', ivars))
+             ) 
+    out <- dat[pars,
+               ][,
+                 pred_denom := sum(eval(parse(text = gravity_vars(model_vars[-1]))), na.rm = T),
+                 by = code_orig,
+                 ][,
+                   prediction := sum(V1, na.rm = T)*eval(parse(text = gravity_vars(model_vars[-1])))/pred_denom,
+                   by = code_orig
+                   ]
+    return(out[,.(code_orig, code_dest, actual = V1, prediction)])
+}
+
+## list with files from storage
+azure_storagefile_list <- function(files, job_name) {
+    config <- rjson::fromJSON(file = paste0("credentials.json"))
+    ## Get Storage Account Credentials
+    storageCredentials <- rAzureBatch::SharedKeyCredentials$new(
+                                                                name = config$sharedKey$storageAccount$name,
+                                                                key = config$sharedKey$storageAccount$key
+                                                            )
+    storageAccountName <- storageCredentials$name
+    ## Generate Storage Client for SAS Token
+    storageClient <- rAzureBatch::StorageServiceClient$new(
+                                                           authentication = storageCredentials,
+                                                           url = sprintf("https://%s.blob.%s",
+                                                                         storageCredentials$name,
+                                                                         config$sharedKey$storageAccount$endpointSuffix
+                                                                         )
+                                                       )
+    ## create read only credentials
+    readSasToken <- storageClient$generateSasToken(permission = "r", "c",
+                                                   path = job_name
+                                                   )
+    ## create list of storage files
+    storageFiles <- lapply(1:nrow(files),
+                           function(x) {
+                               rAzureBatch::createBlobUrl(storageAccountName,
+                                                          job_name,
+                                                          files[[1]][x],
+                                                          readSasToken)
+                           })
+    return(storageFiles)
+}
