@@ -22,7 +22,7 @@
         },
         "autoscaleFormula": "QUEUE_AND_RUNNING"
     },
-    "containerImage": "husbyt/custom-geospatial",
+    "containerImage": "husbyt/custom-geospatial3",
     "rPackages": {
         "cran": [],
         "github": [],

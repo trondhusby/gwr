@@ -1,6 +1,10 @@
-## title: estimation of short-distance migration 2008
+## title: data wrangling
 ## author: trond
 ## date: 03.12.2018
+
+##
+## house keeping
+##
 
 library(readxl)
 library(raster)
@@ -13,15 +17,10 @@ library(ggplot2)
 library(cbsodataR)
 library(parallel)
 library(doParallel)
-library(viridis)
 library(gridExtra)
-library(devtools)
 library(sf)
 library(httr)
 library(jsonlite)
-library(GWmodel)
-library(corrplot)
-library(caret)
 
 ## some nice refs
 # https://cran.r-project.org/web/packages/spgwr/index.html
@@ -39,11 +38,41 @@ source('handy_functions.R')
 ## read 2006 - 2008 file with data
 #source('short_distance_estimation_08.R')
 
+##
+## read data
+##
+
+
 ## read data on house prices and costs
 cbs_dt <- data.table(cbs_get_toc(Language="nl"))
-
 ##cbs_dt[grepl('Voorraad', Title), .(Identifier, Title, ShortTitle, Modified)]
+##cbs_dt[grepl('Gebieden', Title), .(Identifier, Title, ShortTitle, Modified)]
 
+## migration data
+load('../data/reg_bila_dt_2016_code.Rdata')
+if(!file.exists('../data/mig_dt_statline.rds')){
+    mig_dt <- data.table(cbs_get_data('81734NED',
+                       RegioVanVestiging = has_substring('GM'),
+                       RegioVanVertrek = has_substring('GM')
+                       ))
+    saveRDS(mig_dt[!is.na(TussenGemeentenVerhuisdePersonen_1)],
+            '../data/mig_dt_statline.rds')
+} else {
+    mig_dt <- readRDS('../data/mig_dt_statline.rds')
+}
+
+## fix orig and destination variable names
+mig_dt[,
+       c('code_orig', 'code_dest') := lapply(.SD,
+                                             function(x) {
+                                                 as.numeric(gsub('GM', '', x))
+                                             }),
+       .SDcols = c(names(mig_dt)[2:1])
+       ][,
+         year := as.numeric(substr(Perioden, 1, 4))
+         ]
+
+## population data
 bev_dt <- data.table(cbs_get_data('37259ned',
                                   Geslacht="T001038",
                                   Perioden=c("2014JJ00","2015JJ00", "2016JJ00")
@@ -83,14 +112,6 @@ wn_dt <- data.table(cbs_get_data('81955NED',
                         by = code
                         ]
 
-                     
-## migration data
-load('../data/reg_bila_dt_2016_code.Rdata')
-
-## municipality list
-gem_list_2016 <- data.table(cbs_get_data('83287NED'))[, code := as.numeric(gsub('GM', '', as.character(RegioS)))]
-
-gem_list_2015 <- data.table(cbs_get_data('82949NED'))[, code := as.numeric(gsub('GM', '', as.character(RegioS)))]
 ## spatial data
 epsg <- data.table(make_EPSG())
 ##epsg[grep('Amersfoort', note, ignore.case = T), ]
@@ -106,35 +127,46 @@ for (i in c(2016)) {
     vierkant[[i]] <- st_transform(vierkant[[i]], epsg[code == 7415, prj4])  
 }
 
-## municipality corrections
-recode_vector <- data.table(read_excel('../data/Recode Municipalities - Vector.xlsm',
-                                       sheet = 3))
 
+##
+## municipality corrections
+##
+
+## read in data on code changes 
+code_changes <- data.table(read_excel('../data/Recode Municipalities - Vector 8_11_2018.xlsm', sheet = 3))
+
+## recode migration data
+mig_dt_l2016 <- rbindlist(lapply(2012:2016,
+                                 function(x) {
+                                     recode_matrix_recursive(
+                                         dat = mig_dt[year == x,
+                                                      .(code_orig, code_dest, year,
+                                                        TussenGemeentenVerhuisdePersonen_1)
+                                                      ],
+                                         var_name = "TussenGemeentenVerhuisdePersonen_1",
+                                         in_year = x,
+                                         out_year = 2016)
+                                 })
+                          )
 
 ## recode population data
-pop_dt_l2016 <- rbindlist(list(bev_dt[year == 2016 & !is.na(BevolkingOp1Januari_1),
-                                      .(code, year, V2 = BevolkingOp1Januari_1)
-                                      ],
-                               recode_mun(dat = bev_dt, var_name = "BevolkingOp1Januari_1", in_year = 2015, out_year = 2016),
-                               recode_mun(dat = bev_dt, var_name = "BevolkingOp1Januari_1", in_year = 2014, out_year = 2016)
-                               )
-                          )
-
-pop_dt_l2016 <- rbindlist(list(bev_dt[year == 2016 & !is.na(BevolkingOp1Januari_1),
-                                      .(code, year,
-                                        BevolkingOp1Januari_1,
-                                        BevolkingOp31December_25)
-                                      ],
-                               recode_mun_vars(dat = bev_dt,
-                                               vars = c("BevolkingOp1Januari_1", "BevolkingOp31December_25"),
-                                               in_year = 2015, out_year = 2016),
-                               recode_mun_vars(dat = bev_dt,
-                                               vars = c("BevolkingOp1Januari_1", "BevolkingOp31December_25"),
-                                               in_year = 2014, out_year = 2016)
-                               )
-                          )
-
-
+pop_dt_l2016 <- rbindlist(lapply(seq(2014, 2016),
+                                 function(x) {
+                                     if (x == 2016) {
+                                         bev_dt[year == 2016 & !is.na(BevolkingOp1Januari_1),
+                                                .(code, year,
+                                                  BevolkingOp1Januari_1,
+                                                  BevolkingOp31December_25)
+                                                ]
+                                     } else {
+                                         recode_vec_vars(
+                                             dat = bev_dt[year == x],
+                                             vars = c("BevolkingOp1Januari_1",
+                                                      "BevolkingOp31December_25"),
+                                             in_year = x,
+                                             out_year = 2016) 
+                                     }
+                       }))
 
 ## recoded building data
 wn_vars <- c("BeginstandVoorraad_1", "EindstandVoorraad_8",
@@ -146,13 +178,13 @@ wn_dt_l2016 <- rbindlist(list(wn_dt[year == 2016 & !is.na(BeginstandVoorraad_1),
                                     c('code', 'year', wn_vars),
                                     with = F
                                     ],
-                              recode_mun_vars(dat = wn_dt,
+                              recode_vec_vars(dat = wn_dt,
                                               vars = wn_vars,
                                               in_year = 2015, out_year = 2016),
-                              recode_mun_vars(dat = wn_dt,
+                              recode_vec_vars(dat = wn_dt,
                                               vars = wn_vars,
                                               in_year = 2014, out_year = 2016),
-                              recode_mun_vars(dat = wn_dt,
+                              recode_vec_vars(dat = wn_dt,
                                               vars = wn_vars,
                                               in_year = 2013, out_year = 2016)
                          ))
@@ -172,7 +204,9 @@ wn_dt_l2016[, .(mean(supply_growth), sd(supply_growth)), by = year]
 ## clean up mun code
 gem_nl[[2016]]$code <- as.numeric(gsub('GM', '', as.character(gem_nl[[2016]]$GM_CODE)))
 
+##
 ## create population-weighted centroids
+##
 
 ## find centroids in each square and overlap with municipality
 vk_cents <- data.table(st_join(st_centroid(vierkant[[2016]][,1:2]),
@@ -218,6 +252,10 @@ if (length(missing_cents) > 0 ) {
   pop_w_cents <- rbindlist(list(pop_w_cents[!GM_CODE %in% missing_cents[,1]], missing_cents))
 } 
 
+##
+## create variables and training data
+##
+
 ## calculate distance between municipalities
 cent_grid <- data.table(expand.grid(pop_w_cents$GM_CODE, pop_w_cents$GM_CODE))
 setkey(cent_grid, Var1)
@@ -231,7 +269,6 @@ cent_grid[,
           ][,
             dist_test := sqrt((d_x - o_x)^2 + (d_y - o_y)^2) / 1000
             ]
-
 
 ## distance over the road
 if(!file.exists('../data/road_dist.RData')) {
@@ -249,7 +286,7 @@ cent_grid[results, dist_rd := i.dist/1000]
 cent_grid[Var1 == Var2, dist_rd := 0]
 
 ## create data table with needed variables: choose average 2014 to 2015
-inp_dt <- merge(reg_bila_dt_2016_code[year %in% c(2014, 2015),
+inp_dt <- merge(mig_dt_l2016[year %in% c(2014, 2015),
                                       sum(value),
                                       by = c("code_orig", "code_dest", "year")
                                       ##by = c("code_orig", "code_dest", "year", "age_group")
@@ -295,8 +332,6 @@ if(!file.exists('../output/centrality.rds')) {
     setkey(inp_dt, code_orig)
     ## calculate centrality
     system.time(
-        ## centrality <- foreach(x=inp_dt[,unique(code_orig)],
-        ##                      .packages = 'data.table') %dopar% {
         centrality <- lapply(inp_dt[,unique(code_orig)],
                                function(x) {
                                    dt <- rbindlist(lapply(inp_dt[code_orig == x & code_dest != x , unique(code_dest)],
@@ -319,9 +354,6 @@ if(!file.exists('../output/centrality.rds')) {
 } else {
     centrality <- readRDS('../output/centrality.rds')
 }
-
-## centrality[x == 363 & y %in% c(362, 384), ]
-## centrality2[x == 363 & y %in% c(362, 384), ]
 
 setkey(inp_dt, code_orig, code_dest)
 setkey(centrality, x, y)
@@ -370,11 +402,12 @@ sp_dt@proj4string <- CRS(epsg[code == 7415, prj4])
 
 save(sp_dt, file = '../output/sp_dt.Rdata')
 
-
+##
 ## create test data
+##
 
 ## create data table with needed variables: choose average 2014 to 2015
-test_dt <- merge(reg_bila_dt_2016_code[year == 2016,
+test_dt <- merge(mig_dt_l2016[year == 2016,
                                        sum(value),
                                        ##c("code_orig", "code_dest", "year", "age_group")
                                        c("code_orig", "code_dest", "year")
@@ -418,8 +451,6 @@ if(!file.exists('../output/test_centrality.rds')) {
     setkey(test_dt, code_orig)
     ## calculate centrality
     system.time(
-        ## centrality <- foreach(x=inp_dt[,unique(code_orig)],
-        ##                      .packages = 'data.table') %dopar% {
         centrality <- lapply(test_dt[,unique(code_orig)],
                                function(x) {
                                    dt <- rbindlist(lapply(test_dt[code_orig == x & code_dest != x , unique(code_dest)],
@@ -477,5 +508,46 @@ test_dt[code_orig != code_dest,
        ]
 
 saveRDS(test_dt, file = '../output/test_dt.rds')
+
+##
+## checks and tests
+##
+
+## check whether matrix recoding works
+check_recoding <- lapply(seq(2011, 2015),
+                         function(x) {
+                             id <- cbs_dt[grepl('Gebieden', Title) & grepl('2016', Title),
+                                          Identifier
+                                          ]
+                             gem_list <- data.table(cbs_get_data(id))
+                             gem_list[,
+                                      code := as.numeric(gsub('GM', '', as.character(RegioS)))
+                                      ]
+                             test <- recode_matrix_recursive(
+                                 dat = mig_dt[year == x,
+                                              .(code_orig, code_dest, year,
+                                                TussenGemeentenVerhuisdePersonen_1)
+                                              ],
+                                 var_name = "TussenGemeentenVerhuisdePersonen_1",
+                                 in_year = x,
+                                 out_year = 2016)
+                             tmp1 <- unique(test$code_orig)[!unique(test$code_orig) %in% gem_list$code]
+                             tmp2 <- gem_list$code[!gem_list$code %in% unique(test$code_orig)]
+                             tmp3 <- unique(test$code_dest)[!unique(test$code_dest) %in% gem_list$code]
+                             tmp4 <- gem_list$code[!gem_list$code %in% unique(test$code_dest)]
+                             return(list(tmp1, tmp2, tmp3, tmp4))         
+                         })
+
+## plot against previous migration data
+ggplot(merge(reg_bila_dt_2016_code[, sum(value), by = c('code_orig', 'code_dest', 'year')],
+      mig_dt_l2016,
+      by = c('code_orig', 'code_dest', 'year'),
+      all.x=T,all.y=T
+      )[code_orig == 363, ]
+      ) +
+    geom_density(aes(x=V1), col = 'blue', alpha = 0.2) +
+    geom_density(aes(x=TussenGemeentenVerhuisdePersonen_1), col = 'red', alpha = 0.2) +
+    theme_bw() +
+    facet_wrap(~year)
 
 ## end script

@@ -195,16 +195,16 @@ int_trs <- function(x){
   xint
 }
 
-## function for recoding municipalities
-recode_mun <- function(dat, var_name, in_year, out_year) {
+## function for recoding municipalities (vector version)
+recode_vec <- function(dat, var_name, in_year, out_year) {
     dat <- dat[year==in_year & !is.na(get(var_name)),
                c('code', 'year', var_name),
                with=F]
     for (yr in seq(in_year, out_year-1)) {
-        rec_dt <- recode_vector[jaar == yr + 1 | (jaar == yr & maand > 1),
+        rec_dt <- code_changes[jaar == yr + 1 | (jaar == yr & maand > 1),
                                 .(jaar, oud_code, frac, nieuw_code, maand, dag)
                                 ]
-        out <- merge(rec_dt,
+        tmp <- merge(rec_dt,
                      dat,
                      by.x = 'oud_code', by.y = 'code', all.x = T, all.y = F
                      )[,
@@ -213,7 +213,7 @@ recode_mun <- function(dat, var_name, in_year, out_year) {
                          .(in_year, sum(V3)),
                          by = nieuw_code
                          ]
-        dat <- unique(rbindlist(list(out,
+        dat <- unique(rbindlist(list(tmp,
                                      dat[!code %in% rec_dt[frac<1, oud_code]]
                                      )
                                 )[,
@@ -226,10 +226,10 @@ recode_mun <- function(dat, var_name, in_year, out_year) {
 }
 
 ## function for recoding municipalities - several variables
-recode_mun_vars <- function(dat,vars, in_year, out_year) {
+recode_vec_vars <- function(dat,vars, in_year, out_year) {
     tmp <- lapply(seq_along(vars),
                   function(x) {
-                      recode_mun(dat, vars[x], in_year, out_year)
+                      recode_vec(dat, vars[x], in_year, out_year)
                   })   
     for (i in 1:length(tmp)) {
         if (i == 1) {
@@ -241,6 +241,86 @@ recode_mun_vars <- function(dat,vars, in_year, out_year) {
     return(out)
 }
 
+## function for recoding municipality codes year on year
+recode_matrix_year_on_year <- function(dat, var_name, in_year, out_year) {
+    if (out_year - in_year > 1) stop("Not year on year input")
+    ## subset 
+    rec_dt <- code_changes[jaar == out_year  | (jaar == in_year & maand > 1),
+                            .(jaar, oud_code, frac, nieuw_code, maand, dag)
+                            ]
+    ## replace origins
+    tmp <- merge(dat[code_orig %in% rec_dt$oud_code | code_dest %in% rec_dt$oud_code],
+                 rec_dt,
+                 by.x = 'code_orig',
+                 by.y='oud_code',
+                 all.x = T,
+                 allow.cartesian = T)
+    ## replace destinations
+    tmp <- merge(tmp, rec_dt,
+                 by.x = 'code_dest',
+                 by.y='oud_code',
+                 all.x = T,
+                 allow.cartesian = T)
+    ## fix na's in origins or destinations
+    tmp[is.na(frac.y),
+        ':=' (frac.y = 1, nieuw_code.y = code_dest)
+        ][is.na(frac.x),
+          ':=' (frac.x = 1, nieuw_code.x = code_orig)
+          ][,
+            moved := frac.x * frac.y * get(var_name)
+            ]
+    ## calculate moves over new municipalities
+    out <- tmp[frac.x * frac.y > 0,
+               .(in_year, sum(moved)),
+               by = c('nieuw_code.x', 'nieuw_code.y')
+               ]
+    ## combine with non-modified data  
+    old_codes <- rec_dt[!frac == 0 | nieuw_code %in% oud_code, unique(oud_code)]
+    dat <- unique(
+        rbindlist(list(out,
+                       dat[!(code_orig %in% old_codes | code_dest %in% old_codes)]
+                       )
+                  )[,
+                    .(in_year, sum(V2)),
+                    by = c('nieuw_code.x', 'nieuw_code.y')
+                    ])
+    setnames(dat, c('code_orig', 'code_dest', 'year', var_name))
+    ## fix friese meeren...
+    if (in_year == 2016) {
+        dat[code_orig == 1921,
+            code_orig := 1940
+            ][code_dest == 1921,
+              code_dest := 1940
+              ]
+    }
+    return(dat)
+}
+
+## function for recoding municipality codes recursively
+recode_matrix_recursive <- function(dat, var_name, in_year, out_year) {
+    ## initialisation
+    in_year_tmp <- in_year
+    ## update codes recursively each year
+    while(out_year - in_year_tmp > 0) {
+        if (out_year - in_year_tmp > 1) {            
+            dat <- recode_matrix_recursive(dat,
+                                           var_name,
+                                           in_year_tmp,
+                                           in_year_tmp + 1)
+        } else {
+            dat <- recode_matrix_year_on_year(dat,
+                                              var_name,
+                                              in_year_tmp,
+                                              out_year)
+        }
+        in_year_tmp <- in_year_tmp + 1        
+    }
+    ## update year
+    dat[, year := in_year]
+    return(dat)
+}
+
+## predicting flows using the gravity function
 pred_fn <- function(dat, pars) {   
     setkey(dat, code_orig, code_dest)
     setkey(pars, code_orig, code_dest)
@@ -291,3 +371,5 @@ azure_storagefile_list <- function(files, job_name) {
                            })
     return(storageFiles)
 }
+
+## end of code

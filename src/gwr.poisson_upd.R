@@ -1,9 +1,10 @@
 bw.ggwr2 <- function (formula, data, family = "poisson", approach = "CV", 
     kernel = "bisquare", adaptive = FALSE, p = 2, theta = 0, 
-    longlat = F, dMat) 
+    longlat = F, dMat, f.bw) 
 {
     if (is(data, "Spatial")) {
         dp.locat <- coordinates(data)
+        regression.points <- data
         data <- as(data, "data.frame")
     }
     else {
@@ -32,8 +33,22 @@ bw.ggwr2 <- function (formula, data, family = "poisson", approach = "CV",
             stop("Dimensions of dMat are not correct")
     }
     if (adaptive) {
-        upper <- dp.n
-        lower <- 20
+        if (dp.n > 1200) {
+            upper <- dp.n / 10
+        } else {
+            upper <- dp.n
+        }
+        if (family == 'poisson.fe') {
+            if (kernel %in% c('gaussian', 'boxcar')) {
+                lower <- 65
+            } else if (kernel %in% c('bisquare', 'tricube')) {
+                lower <- 150
+            }
+            
+        } else {
+            lower <- 20
+        }
+        
     }
     else {
         if (DM.given) {
@@ -60,20 +75,134 @@ bw.ggwr2 <- function (formula, data, family = "poisson", approach = "CV",
         }
     }
     bw <- NA
-    if (approach == "cv" || approach == "CV") 
-        bw <- gold(ggwr.cv2, lower, upper, adapt.bw = adaptive, 
-            x, y, family = family, kernel, adaptive, dp.locat, 
-            p, theta, longlat, dMat)
-    else if (approach == "aic" || approach == "AIC" || approach == 
-        "AICc") 
-        bw <- gold(ggwr.aic, lower, upper, adapt.bw = adaptive, 
-            x, y, family = family, kernel, adaptive, dp.locat, 
-            p, theta, longlat, dMat)
+    if (approach == "cv" || approach == "CV") {
+        ## bw <- gold(ggwr.cv2, lower, upper, adapt.bw = adaptive, 
+        ##     x, y, family = family, kernel, adaptive, dp.locat, 
+        ##     p, theta, longlat, dMat, data = regression.points)
+        
+        bw <- genoud(fn=ggwr.cv2, nvars = 1,
+                     Domains = matrix(c(lower, upper), ncol = 2),
+                     data.type.int = T, pop.size = floor((upper - lower)/10),
+                     X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
+                     dp.locat = dp.locat,
+                     theta=theta, longlat=longlat, dMat=dMat, data = regression.points)
+    } else if (approach == "gcv" || approach == "GCV") {
+        ## bw <- gold(ggwr.gcv, lower, upper, adapt.bw = adaptive, 
+        ##     x, y, family = family, kernel, adaptive, dp.locat, 
+        ##     p, theta, longlat, dMat, data = regression.points)
+        bw <- genoud(fn=ggwr.gcv, nvars = 1,
+                     Domains = matrix(c(lower, upper), ncol = 2),
+                     data.type.int = T, pop.size = 100, max.generations = 10, 
+                     X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
+                     dp.locat = dp.locat,
+                     theta=theta, longlat=longlat, dMat=dMat, data = regression.points)        
+    } else if (approach == "aic" || approach == "AIC" || approach == 
+        "AICc") {
+        ## bw <- gold(ggwr.aic, lower, upper, adapt.bw = adaptive, 
+        ##     x, y, family = family, kernel, adaptive, dp.locat, 
+        ##     p, theta, longlat, dMat)
+        bw <- ggwr.aic2(bw = f.bw, 
+                       X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
+                       dp.locat = dp.locat,
+                       p=p, theta=theta, longlat=longlat, dMat=dMat, data = regression.points)
+    } else if (approach == "brute-force") {        
+        for (idx in seq(lower, upper)) {
+            tmp <- ggwr.cv(bw = idx, 
+                       X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
+                       dp.locat = dp.locat,
+                       p=p, theta=theta, longlat=longlat, dMat=dMat, data = regression.points)
+            if (idx == lower) {
+                bw <- tmp
+            } else if (tmp < bw) {
+                bw <- tmp
+            }
+        }
+    }
     bw
 }
 
+ggwr.gcv <- function (bw, X, Y, family = "poisson", kernel = "bisquare", 
+    adaptive = F, dp.locat, pr = 2, theta = 0, longlat = F, dMat, data) 
+{
+    dp.n <- length(dp.locat[, 1])
+    var.n <- ncol(X)
+    if (is.null(dMat)) 
+        DM.given <- F
+    else {
+        DM.given <- T
+        dim.dMat <- dim(dMat)
+        if (dim.dMat[1] != dp.n || dim.dMat[2] != dp.n) 
+            stop("Dimensions of dMat are not correct")
+    }
+    S<-matrix(nrow=dp.n,ncol=dp.n)
+    betas <- matrix(0, nrow=dp.n, ncol=var.n)
+    Wt <- matrix(numeric(dp.n * dp.n), ncol = dp.n)
+    x_index <- 1:dp.n
+    for (i in 1:dp.n) {
+        if (DM.given) 
+            dist.vi <- dMat[, i]
+        else {
+            dist.vi <- gw.dist(dp.locat = dp.locat, focus = i, 
+                p = p, theta = theta, longlat = longlat)
+        }
+        W.i <- gw.weight(dist.vi, bw, kernel, adaptive)       
+        Wt[, i] <- W.i
+    }
+    wt2 <- rep(1, dp.n)
+    if (family == "poisson") {
+        res1 <- gwr.poisson.wt2(Y, X, bw, Wt)
+        wt2 <- res1[[1]]
+        y.adj <- res1[[3]]
+    } else if (family == "poisson.fe") {
+        res1 <- gwr.poisson.fe.wt(Y, X, bw, Wt, data=data, loo = F)
+        wt2 <- res1[[1]]
+        y.adj <- res1[[3]]
+        x.sub <- res1[[4]]
+        gwr.sub <- res1[[5]]
+        iv.cols <- res1[[6]]
+        fe.sub.cols <- res1[[7]]
+        W.sub <- res1[[8]]
+    } else if (family == "binomial") {
+        res1 <- gwr.binomial.wt(Y, X, bw, Wt)
+        wt2 <- res1[[1]]
+        y.adj <- res1[[3]]
+    }
+    for (i in 1:dp.n) {
+        if (i>1 & any(coordinates(data)[i,] == coordinates(data)[i-1,])) {
+            betas[i, c(iv.cols, fe.sub.cols[[i]])] <- betas[i-1, c(iv.cols, fe.sub.cols[[i-1]])]
+            S[i,gwr.sub[[i]]] <- S[i-1,gwr.sub[[i-1]]]
+        } else {
+            y.sub <- y.adj[gwr.sub[[i]]]
+            wt2.sub <- wt2[gwr.sub[[i]]]
+            focus_i <- which(x_index[gwr.sub[[i]]] == i)
+            gwsi<-try(gw_reg(x.sub[[i]],y.sub,W.sub[[i]]*wt2.sub,hatmatrix=T,focus_i))
+            if (!inherits(gwsi, "try-error")) {
+                betas[i, c(iv.cols, fe.sub.cols[[i]])]<-gwsi[[1]]
+                S[i,gwr.sub[[i]]]<-gwsi[[2]]
+            } else {                
+                break 
+            }
+            
+        }                
+    }
+    yhat <- gw.fitted(X, betas)
+    ## y_test <<- Y
+    ## residual_test <<-Y-exp(yhat_test)
+    ## S_test <<- S
+    if (!any(is.infinite(diag(S)))) {
+        CV.score <- sqrt(mean(((Y - exp(yhat))/(1-diag(S)))^2))
+    } else {
+        CV.score <- Inf
+    }
+    if (adaptive) 
+        cat("Adaptive bandwidth:", bw, "CV score:", CV.score, 
+            "\n")
+    else cat("Fixed bandwidth:", bw, "CV score:", CV.score, "\n")
+    return(CV.score)
+}
+
 ggwr.cv2 <- function (bw, X, Y, family = "poisson", kernel = "bisquare", 
-    adaptive = F, dp.locat, p = 2, theta = 0, longlat = F, dMat) 
+    adaptive = F, dp.locat, p = 2, theta = 0, longlat = F, dMat, data) 
 {
     dp.n <- length(dp.locat[, 1])
     if (is.null(dMat)) 
@@ -103,18 +232,39 @@ ggwr.cv2 <- function (bw, X, Y, family = "poisson", kernel = "bisquare",
         wt2 <- res1[[1]]
         y.adj <- res1[[3]]
     }
+    if (family == "poisson.fe") {
+        res1 <- gwr.poisson.fe.wt(Y, X, bw, Wt, data=data)
+        wt2 <- res1[[1]]
+        y.adj <- res1[[3]]
+        x.sub <- res1[[4]]
+        gwr.sub <- res1[[5]]
+        iv.cols <- res1[[6]]
+        fe.sub.cols <- res1[[7]]
+    }
     else if (family == "binomial") {
         res1 <- gwr.binomial.wt(Y, X, bw, Wt)
         wt2 <- res1[[1]]
         y.adj <- res1[[3]]
     }
     for (i in 1:dp.n) {
-        W.i <- Wt[, i] * wt2
-        gwsi <- try(gw_reg(X, y.adj, W.i, FALSE, i))
+        if (family == "poisson.fe") {
+            W.i <- Wt[gwr.sub[[i]], i] * wt2[gwr.sub[[i]]]
+            gwsi <- try(gw_reg(x.sub[[i]],
+                               y.adj[gwr.sub[[i]]],
+                               W.i, FALSE, i)
+                               )
+        } else {
+            W.i <- Wt[, i] * wt2
+            gwsi <- try(gw_reg(X, y.adj, W.i, FALSE, i))
+        }
         if (!inherits(gwsi, "try-error")) {
-            yhat.noi <- X[i, ] %*% (gwsi[[1]])
-            if (family == "poisson") 
-                CV[i] <- Y[i] - exp(yhat.noi)
+            if (family == "poisson.fe") {
+                yhat.noi <- X[i, c(iv.cols, fe.sub.cols[[i]])] %*% (gwsi[[1]])
+            } else {
+                yhat.noi <- X[i, ] %*% (gwsi[[1]])
+            }
+            if (family == "poisson" | family == "poisson.fe") 
+                CV[i] <- as.numeric(Y[i]) - exp(yhat.noi)
             else if (family == "binomial") 
                 CV[i] <- Y[i] - exp(yhat.noi)/(1 + exp(yhat.noi))
         }
@@ -124,7 +274,8 @@ ggwr.cv2 <- function (bw, X, Y, family = "poisson", kernel = "bisquare",
         }
     }
     if (!any(is.infinite(CV))) 
-        CV.score <- t(CV) %*% CV
+        ##CV.score <- sqrt(t(CV) %*% CV)
+        CV.score <- sqrt(mean(abs(CV)))
     else {
         CV.score <- Inf
     }
@@ -134,6 +285,93 @@ ggwr.cv2 <- function (bw, X, Y, family = "poisson", kernel = "bisquare",
     else cat("Fixed bandwidth:", bw, "CV score:", CV.score, "\n")
     CV.score
 }
+
+ggwr.aic2 <- function (bw, X, Y, family, kernel, adaptive, dp.locat, p = 2, 
+    theta = 0, longlat = F, dMat, data) 
+{
+    dp.n <- length(dp.locat[, 1])
+    if (is.null(dMat)) 
+        DM.given <- F
+    else {
+        DM.given <- T
+        dim.dMat <- dim(dMat)
+        if (dim.dMat[1] != dp.n || dim.dMat[2] != dp.n) 
+            stop("Dimensions of dMat are not correct")
+    }
+    S <- matrix(nrow = dp.n, ncol = dp.n)
+    Wt <- matrix(numeric(dp.n * dp.n), ncol = dp.n)
+    x_index <- 1:dp.n
+    for (i in 1:dp.n) {
+        if (DM.given) 
+            dist.vi <- dMat[, i]
+        else {
+            dist.vi <- gw.dist(dp.locat = dp.locat, focus = i, 
+                p = p, theta = theta, longlat = longlat)
+        }
+        W.i <- gw.weight(dist.vi, bw, kernel, adaptive)
+        Wt[, i] <- W.i
+    }
+    wt2 <- rep(1, dp.n)
+    if (family == "poisson") {
+        gw.possions <- gwr.poisson.wt(Y, X, bw, Wt)
+        wt2 <- gw.possions[[1]]
+        llik <- gw.possions[[2]]
+    }
+    else if (family == "poisson.fe") {
+        res1 <- gwr.poisson.fe.wt(Y, X, bw, Wt, data=data, loo = F)
+        wt2 <- res1[[1]]
+        llik <- res1[[2]]
+        y.adj <- res1[[3]]
+        x.sub <- res1[[4]]
+        gwr.sub <- res1[[5]]
+        iv.cols <- res1[[6]]
+        fe.sub.cols <- res1[[7]]
+        W.sub <- res1[[8]]
+    }
+    else if (family == "binomial") {
+        gw.binomials <- gwr.binomial.wt(Y, X, bw, Wt)
+        wt2 <- gw.binomials[[1]]
+        llik <- gw.binomials[[2]]
+    }
+    for (i in 1:dp.n) {
+        ##W.i <- Wt[, i] * wt2
+        ##Ci <- try(Ci_mat(X, W.i))
+        y.sub <- y.adj[gwr.sub[[i]]]
+        wt2.sub <- wt2[gwr.sub[[i]]]
+        focus_i <- which(x_index[gwr.sub[[i]]] == i)
+        gwsi<-gw_reg(x.sub[[i]],y.sub,W.sub[[i]]*wt2.sub,hatmatrix=T,focus_i)
+        S[i,gwr.sub[[i]]]<-gwsi[[2]]
+        Ci<-gwsi[[3]]
+        Ci_list[[i]] <<- gwsi[[3]]
+        X_test[[i]] <<- gwsi[[2]]
+        if (!inherits(Ci, "try-error")) 
+            ##S[i, ] <- X[i, ] %*% Ci
+            S[i,gwr.sub[[i]]]<-gwsi[[2]]
+        else {
+            S[i, ] <- Inf
+            break
+        }
+    }
+    S_test <<- S
+    if (!any(is.infinite(S))) {
+        tr.S <- sum(diag(S))
+        AIC <-  -2*llik + 2*tr.S*dp.n/(dp.n-tr.S-2)
+        AICc <- -2 * llik + 2 * tr.S + 2 * tr.S * (tr.S + 1)/(dp.n - 
+            tr.S - 1)
+    }
+    else AICc <- Inf
+    if (adaptive) {
+        cat("Adaptive bandwidth (number of nearest neighbours):", 
+            bw, "AICc value:", AICc, "\n")
+        cat("Adaptive bandwidth (number of nearest neighbours):", 
+            bw, "AIC value:", AIC, "\n")
+    
+    } else {
+        cat("Fixed bandwidth:", bw, "AICc value:", AICc, "\n")
+    }
+    AICc
+}
+
 
 gwr.poisson.wt2 <- function (y, x, bw, W.mat, verbose = T) 
 {   
@@ -176,6 +414,127 @@ gwr.poisson.wt2 <- function (y, x, bw, W.mat, verbose = T)
             break
     }
     res <- list(wt2, llik, y.adj)
+    res
+}
+
+gwr.poisson.fe.wt <- function (y, x, bw, W.mat, data, verbose = F, loo = T) 
+{   
+    fe.col  <-  1
+    fe.cutoff  <- 10^-12
+    tol <- 1e-05
+    maxiter <- 20
+    var.n <- ncol(x)
+    dp.n <- nrow(x)
+    regression.points <- data
+    ## initialisation
+    betas <- matrix(0, nrow=dp.n, ncol=var.n)
+    betas1 <- matrix(0, nrow=dp.n, ncol=var.n)
+    betas.SE <-matrix(0, nrow=dp.n, ncol=var.n)
+    betas.TV <-matrix(0, nrow=dp.n, ncol=var.n)
+    ##S: hatmatrix
+    S<-matrix(nrow=dp.n,ncol=dp.n)
+    #C.M<-matrix(nrow=dp.n,ncol=dp.n)
+    colnames(betas) <- colnames(x)
+    ## colnames(betas)[1]<-"Intercept"  
+    ## fixed effects regression: only include fe-dummies with weight > cutoff  
+    fe.col.name <- names(regression.points@data)[fe.col]   
+    fe.col.frml <- paste(unlist(lapply(fe.col.name,
+                                       function(x) paste0('factor(', x, ')'))),
+                         collapse = '+')
+    fe.cols <- grep('factor', colnames(x), value = T)
+    iv.cols <- which(!grepl('factor', colnames(x)))
+    x_index <- 1:dp.n
+    ## initialisation
+    W.sub <- list()
+    wt2.sub <- list()
+    x.sub <- list()
+    gwr.sub <- list()
+    fe.sub.cols <- list()
+    for (i in 1:dp.n) {
+        if (i>1 & any(coordinates(regression.points)[i,] == coordinates(regression.points)[i-1,])) {
+            gwr.sub[[i]] <- gwr.sub[[i-1]]
+            fe.sub.cols[[i]] <- fe.sub.cols[[i-1]]
+            W.sub[[i]] <- W.sub[[i-1]]
+            x.sub[[i]] <- x.sub[[i-1]]
+        } else {
+            ## find subset of observations where weight > cutoff
+            gwr.sub[[i]] <- which(W.mat[,i] > fe.cutoff)
+            ## find non-zero fixed effects and corresponding column indexes
+            fe.sub <- unlist(lapply(fe.col,
+                                      function(x) {
+                                          tmp <- unique(regression.points@data[gwr.sub[[i]], x])
+                                          paste0('factor(',
+                                                 names(regression.points@data)[x],
+                                                 ')', tmp)
+                                      }))
+            fe.sub.cols[[i]] <- which(fe.cols %in% fe.sub) + length(iv.cols)
+            ## subset weight matrix
+            W.sub[[i]] <- W.mat[gwr.sub[[i]], i]
+            ## subset x and create dummy matrix, adjust if all points within one municipality
+            if (length(fe.sub) > 1) {
+                x.sub[[i]] <- cbind(x[gwr.sub[[i]], iv.cols],
+                                    model.matrix(as.formula(paste0('~ ', fe.col.frml, '- 1')),
+                                                 data = regression.points@data[gwr.sub[[i]], ]
+                                                 )
+                                    )           
+            } else {
+                x.sub[[i]] <- cbind(x[gwr.sub[[i]], iv.cols],
+                                    rep(1, nrow(x[gwr.sub[[i]],]))
+                                    )
+            }
+        }
+    }
+    ####################################
+    ##model calibration
+    it.count <- 0
+    llik <- 0
+    mu <- y + 0.1
+    nu <- log(mu)
+    if (verbose) 
+        cat(" Iteration    Log-Likelihood(With bandwidth: ", 
+            bw, ")\n=========================\n")
+    wt2 <- rep(1, dp.n)
+    repeat {
+        y.adj <- nu + (y - mu)/mu
+        for (i in 1:dp.n)
+        {
+            if (!loo & i>1 & any(coordinates(regression.points)[i,] == coordinates(regression.points)[i-1,])) {
+                betas1[i,c(iv.cols, fe.sub.cols[[i]])] <- betas1[i-1,c(iv.cols, fe.sub.cols[[i-1]])]
+            } else {
+                W.i<-W.mat[,i]
+                y.sub <- y.adj[gwr.sub[[i]]]
+                wt2.sub <- wt2[gwr.sub[[i]]]
+                gwsi<-tryCatch({
+                    gw_reg(x.sub[[i]],y.sub,W.sub[[i]]*wt2.sub,hatmatrix=F,i)
+                },
+                warning = function(w) {
+                    stop('Ended with warning ', conditionMessage(w))
+                })             
+                betas1[i,c(iv.cols, fe.sub.cols[[i]])]<-gwsi[[1]]
+            }
+        }
+        nu <- gw.fitted(x, betas1)
+        mu <- exp(nu)
+        old.llik <- llik
+        #llik <- sum(y * nu - mu - log(gamma(y + 1)))        
+        llik <- sum(dpois(y, mu, log = TRUE))
+        if (verbose) 
+            cat(paste("   ", formatC(it.count, digits = 4, width = 4), 
+                "    ", formatC(llik, digits = 4, width = 7), 
+                "\n"))
+        if (is.nan(llik)) stop('Log likelihood returned NaN')
+        if (abs((old.llik - llik)/llik) < tol) {
+            ##cat('Converged')
+            break
+        }
+        wt2 <- as.numeric(mu)
+        it.count <- it.count+1
+        if (it.count == maxiter) {
+            ##cat('Reached max iterations')
+            break
+        }
+    }
+    res <- list(wt2, llik, y.adj, x.sub, gwr.sub, iv.cols, fe.sub.cols, W.sub)
     res
 }
 
@@ -1815,7 +2174,15 @@ gwr.poisson.fe <-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e
              W.i<-W1.mat[,i]
              y.sub <- y.adj[gwr.sub[[i]]]
              wt2.sub <- wt2[gwr.sub[[i]]]
-             gwsi<-gw_reg(x.sub[[i]],y.sub,W1.sub[[i]]*wt2.sub,hatmatrix=F,i)
+             gwsi<-tryCatch({
+                    gwsi<-gw_reg(x.sub[[i]],y.sub,W1.sub[[i]]*wt2.sub,hatmatrix=F,i)
+                },
+                warning = function(w) {
+                    stop(paste('Ended with warning ', conditionMessage(w)))
+                })
+             ## gwsi<-try(gw_reg(x.sub[[i]],y.sub,W1.sub[[i]]*wt2.sub,hatmatrix=F,i))
+             ## str(gwsi)
+             ## if (inherits(gwsi, "try-error")) stop("Problem with solver")
              betas1[i,c(iv.cols, fe.sub.cols[[i]])]<-gwsi[[1]]
          }
      }
@@ -1961,3 +2328,5 @@ gwr.poisson.fe <-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e
     else
       res <- list(glms=glms,SDF=SDF)
 }
+
+
