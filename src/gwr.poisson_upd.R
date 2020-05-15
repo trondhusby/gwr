@@ -40,9 +40,9 @@ bw.ggwr2 <- function (formula, data, family = "poisson", approach = "CV",
         }
         if (family == 'poisson.fe') {
             if (kernel %in% c('gaussian', 'boxcar')) {
-                lower <- 65
+                lower <- 200
             } else if (kernel %in% c('bisquare', 'tricube')) {
-                lower <- 150
+                lower <- 50
             }
             
         } else {
@@ -76,16 +76,22 @@ bw.ggwr2 <- function (formula, data, family = "poisson", approach = "CV",
     }
     bw <- NA
     if (approach == "cv" || approach == "CV") {
-        ## bw <- gold(ggwr.cv2, lower, upper, adapt.bw = adaptive, 
-        ##     x, y, family = family, kernel, adaptive, dp.locat, 
-        ##     p, theta, longlat, dMat, data = regression.points)
+        bw <- gold(ggwr.cv2, lower, upper, adapt.bw = adaptive, 
+            x, y, family = family, kernel, adaptive, dp.locat, 
+            p, theta, longlat, dMat, data = regression.points)
+        ## bw <- ggwr.cv2(bw = f.bw, 
+        ##                X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
+        ##                dp.locat = dp.locat,
+        ##                p=p, theta=theta, longlat=longlat, dMat=dMat, data = regression.points
+        ##                )
         
-        bw <- genoud(fn=ggwr.cv2, nvars = 1,
-                     Domains = matrix(c(lower, upper), ncol = 2),
-                     data.type.int = T, pop.size = floor((upper - lower)/10),
-                     X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
-                     dp.locat = dp.locat,
-                     theta=theta, longlat=longlat, dMat=dMat, data = regression.points)
+        ## bw <- genoud(fn=ggwr.cv2, nvars = 1,
+        ##              Domains = matrix(c(lower, upper), ncol = 2),
+        ##              data.type.int = T, pop.size = floor((upper - lower)/10),
+        ##              X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
+        ##              dp.locat = dp.locat,
+        ##              theta=theta, longlat=longlat, dMat=dMat, data = regression.points
+        ##              )$par
     } else if (approach == "gcv" || approach == "GCV") {
         ## bw <- gold(ggwr.gcv, lower, upper, adapt.bw = adaptive, 
         ##     x, y, family = family, kernel, adaptive, dp.locat, 
@@ -95,30 +101,45 @@ bw.ggwr2 <- function (formula, data, family = "poisson", approach = "CV",
                      data.type.int = T, pop.size = 100, max.generations = 10, 
                      X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
                      dp.locat = dp.locat,
-                     theta=theta, longlat=longlat, dMat=dMat, data = regression.points)        
+                     theta=theta, longlat=longlat, dMat=dMat, data = regression.points
+                     )$par        
     } else if (approach == "aic" || approach == "AIC" || approach == 
         "AICc") {
-        ## bw <- gold(ggwr.aic, lower, upper, adapt.bw = adaptive, 
-        ##     x, y, family = family, kernel, adaptive, dp.locat, 
-        ##     p, theta, longlat, dMat)
-        bw <- ggwr.aic2(bw = f.bw, 
-                       X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
-                       dp.locat = dp.locat,
-                       p=p, theta=theta, longlat=longlat, dMat=dMat, data = regression.points)
-    } else if (approach == "brute-force") {        
-        for (idx in seq(lower, upper)) {
-            tmp <- ggwr.cv(bw = idx, 
+        bw <- gold(ggwr.aic2, lower, upper, adapt.bw = adaptive, 
+            x, y, family = family, kernel, adaptive, dp.locat, 
+            p, theta, longlat, dMat, data = regression.points)
+        ## bw <- ggwr.aic2(bw = f.bw, 
+        ##                X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
+        ##                dp.locat = dp.locat,
+        ##                p=p, theta=theta, longlat=longlat, dMat=dMat, data = regression.points
+        ##                )
+    } else if (approach == "brute.force") {
+        min_cv <- -Inf
+        for (idx in seq(lower, upper)[c(1:15)]) {
+            tmp <- ggwr.gcv(bw = idx, 
                        X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
                        dp.locat = dp.locat,
                        p=p, theta=theta, longlat=longlat, dMat=dMat, data = regression.points)
             if (idx == lower) {
-                bw <- tmp
-            } else if (tmp < bw) {
-                bw <- tmp
+                bw <- idx
+                min_cv <- tmp
+            } else if (tmp < min_cv) {
+                bw <- idx
+                min_cv <- tmp
             }
         }
+    } else if (approach == "kfold.cv") {
+        betas <- ggwr.kfold.cv(bw = f.bw,
+                          X=x, Y=y, family = family, kernel=kernel, adaptive=adaptive,
+                          dp.locat = dp.locat,
+                          p=p, theta=theta, longlat=longlat,
+                          dMat=dMat, data = regression.points)
     }
-    bw
+    if (approach == "kfold.cv") {
+        return(betas)
+    } else {
+        return(bw)
+    }  
 }
 
 ggwr.gcv <- function (bw, X, Y, family = "poisson", kernel = "bisquare", 
@@ -136,7 +157,7 @@ ggwr.gcv <- function (bw, X, Y, family = "poisson", kernel = "bisquare",
     }
     S<-matrix(nrow=dp.n,ncol=dp.n)
     betas <- matrix(0, nrow=dp.n, ncol=var.n)
-    Wt <- matrix(numeric(dp.n * dp.n), ncol = dp.n)
+    Wt <- matrix(0, nrow = dp.n, ncol = dp.n)
     x_index <- 1:dp.n
     for (i in 1:dp.n) {
         if (DM.given) 
@@ -182,7 +203,6 @@ ggwr.gcv <- function (bw, X, Y, family = "poisson", kernel = "bisquare",
             } else {                
                 break 
             }
-            
         }                
     }
     yhat <- gw.fitted(X, betas)
@@ -201,6 +221,54 @@ ggwr.gcv <- function (bw, X, Y, family = "poisson", kernel = "bisquare",
     return(CV.score)
 }
 
+ggwr.kfold.cv <- function (bw, X, Y, family = "poisson", kernel = "bisquare", 
+    adaptive = F, dp.locat, pr = 2, theta = 0, longlat = F, dMat, data) 
+{
+    dp.n <- length(dp.locat[, 1])
+    var.n <- ncol(X)
+    if (is.null(dMat)) 
+        DM.given <- F
+    else {
+        DM.given <- T
+        dim.dMat <- dim(dMat)
+        if (dim.dMat[1] != dp.n || dim.dMat[2] != dp.n) 
+            stop("Dimensions of dMat are not correct")
+    }
+    S<-matrix(nrow=dp.n,ncol=dp.n)
+    betas <- matrix(0, nrow=dp.n, ncol=var.n)
+    ##Wt <- matrix(numeric(dp.n * dp.n), ncol = dp.n)
+    Wt <- matrix(0, nrow = dp.n, ncol = dp.n)
+    x_index <- 1:dp.n
+    for (i in 1:dp.n) {
+        if (DM.given) 
+            dist.vi <- dMat[, i]
+        else {
+            dist.vi <- gw.dist(dp.locat = dp.locat, focus = i, 
+                p = p, theta = theta, longlat = longlat)
+        }
+        W.i <- gw.weight(dist.vi, bw, kernel, adaptive)       
+        Wt[, i] <- W.i
+    }
+    wt2 <- rep(1, dp.n)
+    if (family == "poisson") {
+        res1 <- gwr.poisson.wt2(Y, X, bw, Wt)
+        wt2 <- res1[[1]]
+        y.adj <- res1[[3]]
+    } else if (family == "poisson.fe") {
+        res1 <- gwr.poisson.fe.wt(Y, X, bw, Wt, data=data, loo = F)     
+        betas <- res1[[9]]
+    } else if (family == "binomial") {
+        res1 <- gwr.binomial.wt(Y, X, bw, Wt)
+        wt2 <- res1[[1]]
+        y.adj <- res1[[3]]
+    }   
+    yhat <- exp(gw.fitted(X, betas))
+    residuals <- Y - yhat
+    out <- cbind(betas, Y, yhat, residuals)
+    dimnames(out)[[2]] <- c(colnames(X), 'y', 'yhat', 'residuals')
+    return(out)
+}
+
 ggwr.cv2 <- function (bw, X, Y, family = "poisson", kernel = "bisquare", 
     adaptive = F, dp.locat, p = 2, theta = 0, longlat = F, dMat, data) 
 {
@@ -214,7 +282,9 @@ ggwr.cv2 <- function (bw, X, Y, family = "poisson", kernel = "bisquare",
             stop("Dimensions of dMat are not correct")
     }
     CV <- numeric(dp.n)
-    Wt <- matrix(numeric(dp.n * dp.n), ncol = dp.n)
+    ##Wt <- matrix(numeric(dp.n * dp.n), ncol = dp.n)
+    Wt <- matrix(0, nrow = dp.n, ncol = dp.n)
+    ##print(bw)
     for (i in 1:dp.n) {
         if (DM.given) 
             dist.vi <- dMat[, i]
@@ -342,8 +412,8 @@ ggwr.aic2 <- function (bw, X, Y, family, kernel, adaptive, dp.locat, p = 2,
         gwsi<-gw_reg(x.sub[[i]],y.sub,W.sub[[i]]*wt2.sub,hatmatrix=T,focus_i)
         S[i,gwr.sub[[i]]]<-gwsi[[2]]
         Ci<-gwsi[[3]]
-        Ci_list[[i]] <<- gwsi[[3]]
-        X_test[[i]] <<- gwsi[[2]]
+        ##Ci_list[[i]] <<- gwsi[[3]]
+        ##X_test[[i]] <<- gwsi[[2]]
         if (!inherits(Ci, "try-error")) 
             ##S[i, ] <- X[i, ] %*% Ci
             S[i,gwr.sub[[i]]]<-gwsi[[2]]
@@ -352,7 +422,7 @@ ggwr.aic2 <- function (bw, X, Y, family, kernel, adaptive, dp.locat, p = 2,
             break
         }
     }
-    S_test <<- S
+    ##S_test <<- S
     if (!any(is.infinite(S))) {
         tr.S <- sum(diag(S))
         AIC <-  -2*llik + 2*tr.S*dp.n/(dp.n-tr.S-2)
@@ -417,9 +487,9 @@ gwr.poisson.wt2 <- function (y, x, bw, W.mat, verbose = T)
     res
 }
 
-gwr.poisson.fe.wt <- function (y, x, bw, W.mat, data, verbose = F, loo = T) 
+gwr.poisson.fe.wt <- function (y, x, bw, W.mat, data, verbose = T, loo = T) 
 {   
-    fe.col  <-  1
+    fe.col  <-  c(1,3)
     fe.cutoff  <- 10^-12
     tol <- 1e-05
     maxiter <- 20
@@ -437,10 +507,14 @@ gwr.poisson.fe.wt <- function (y, x, bw, W.mat, data, verbose = F, loo = T)
     colnames(betas) <- colnames(x)
     ## colnames(betas)[1]<-"Intercept"  
     ## fixed effects regression: only include fe-dummies with weight > cutoff  
-    fe.col.name <- names(regression.points@data)[fe.col]   
-    fe.col.frml <- paste(unlist(lapply(fe.col.name,
-                                       function(x) paste0('factor(', x, ')'))),
-                         collapse = '+')
+    fe.col.name <- names(regression.points@data)[fe.col]
+    if (length(unique(regression.points@data[, fe.col[2]])) == 1) {
+        fe.col.frml <- paste0('factor(', fe.col.name[1], ')')
+    } else {
+        fe.col.frml <- paste(unlist(lapply(fe.col.name,
+                                           function(x) paste0('factor(', x, ')'))),
+                         collapse = '*')
+    }    
     fe.cols <- grep('factor', colnames(x), value = T)
     iv.cols <- which(!grepl('factor', colnames(x)))
     x_index <- 1:dp.n
@@ -451,39 +525,57 @@ gwr.poisson.fe.wt <- function (y, x, bw, W.mat, data, verbose = F, loo = T)
     gwr.sub <- list()
     fe.sub.cols <- list()
     for (i in 1:dp.n) {
-        if (i>1 & any(coordinates(regression.points)[i,] == coordinates(regression.points)[i-1,])) {
+        if (!loo & i>1 & any(coordinates(regression.points)[i,] == coordinates(regression.points)[i-1,])) {
+
             gwr.sub[[i]] <- gwr.sub[[i-1]]
             fe.sub.cols[[i]] <- fe.sub.cols[[i-1]]
             W.sub[[i]] <- W.sub[[i-1]]
-            x.sub[[i]] <- x.sub[[i-1]]
+            x.sub[[i]] <- x.sub[[i-1]]            
         } else {
             ## find subset of observations where weight > cutoff
             gwr.sub[[i]] <- which(W.mat[,i] > fe.cutoff)
             ## find non-zero fixed effects and corresponding column indexes
-            fe.sub <- unlist(lapply(fe.col,
-                                      function(x) {
-                                          tmp <- unique(regression.points@data[gwr.sub[[i]], x])
-                                          paste0('factor(',
-                                                 names(regression.points@data)[x],
-                                                 ')', tmp)
-                                      }))
+            fe.tmp <- lapply(fe.col,
+                 function(x) {
+                     tmp <- sort(unique(regression.points@data[gwr.sub[[i]], x]))
+                     paste0('factor(',
+                            names(regression.points@data)[x],
+                            ')', tmp)
+                 })           
+            ## create interaction effects
+            fe.sub <- unlist(lapply(seq_along(fe.tmp[[2]]),
+                 function(x) {
+                     if (x == 1) {
+                         c(fe.tmp[[1]], fe.tmp[[2]][-1])
+                     } else if (x > 1 & length(fe.tmp[[1]]) > 1) {
+                         paste(fe.tmp[[1]][-1], fe.tmp[[2]][x], sep = ':')
+                     }
+                 }))
+            ## find fe subset of fe columns
             fe.sub.cols[[i]] <- which(fe.cols %in% fe.sub) + length(iv.cols)
             ## subset weight matrix
             W.sub[[i]] <- W.mat[gwr.sub[[i]], i]
             ## subset x and create dummy matrix, adjust if all points within one municipality
-            if (length(fe.sub) > 1) {
+            if (length(fe.tmp[[1]]) > 1) {
                 x.sub[[i]] <- cbind(x[gwr.sub[[i]], iv.cols],
                                     model.matrix(as.formula(paste0('~ ', fe.col.frml, '- 1')),
                                                  data = regression.points@data[gwr.sub[[i]], ]
                                                  )
-                                    )           
+                                    )
             } else {
                 x.sub[[i]] <- cbind(x[gwr.sub[[i]], iv.cols],
-                                    rep(1, nrow(x[gwr.sub[[i]],]))
-                                    )
+                                    model.matrix(
+                                        as.formula(
+                                            paste0('~ factor(',
+                                                   fe.col.name[2],
+                                                   ')'
+                                                   )
+                                        ),
+                                        data = regression.points@data[gwr.sub[[i]], ]
+                                    ))
             }
         }
-    }
+    }   
     ####################################
     ##model calibration
     it.count <- 0
@@ -534,7 +626,7 @@ gwr.poisson.fe.wt <- function (y, x, bw, W.mat, data, verbose = F, loo = T)
             break
         }
     }
-    res <- list(wt2, llik, y.adj, x.sub, gwr.sub, iv.cols, fe.sub.cols, W.sub)
+    res <- list(wt2, llik, y.adj, x.sub, gwr.sub, iv.cols, fe.sub.cols, W.sub, betas1)
     res
 }
 
@@ -583,8 +675,8 @@ ggwr.basic2 <-function(formula, data, regression.points, bw, family ="poisson", 
     mt <- attr(mf, "terms")
     y <- model.extract(mf, "response")
     x <- model.matrix(mt, mf)
-    ## test_x <<- x
-    ## test_y <<- y
+    test_x <<- x
+    test_y <<- y
     ############################################
     var.n<-ncol(x)
     if(is(regression.points, "Spatial"))
@@ -656,8 +748,10 @@ ggwr.basic2 <-function(formula, data, regression.points, bw, family ="poisson", 
     }
     ####Generate the weighting matrix
     #############Calibration the model
-    W1.mat<-matrix(numeric(dp.n*dp.n),ncol=dp.n)
-    W2.mat<-matrix(numeric(dp.n*rp.n),ncol=rp.n)
+    ##W1.mat<-matrix(numeric(dp.n*dp.n),ncol=dp.n)
+    ##W2.mat<-matrix(numeric(dp.n*rp.n),ncol=rp.n)
+    W1.mat<-matrix(0,nrow=dp.n,ncol=dp.n)
+    W2.mat<-matrix(0,nrow=dp.n,ncol=rp.n)
     for (i in 1:dp.n)
     {
         if (DM1.given) {
@@ -724,7 +818,7 @@ ggwr.basic2 <-function(formula, data, regression.points, bw, family ="poisson", 
 }
 
 ############ Possion GWGLM
-gwr.poisson2<-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e-5, maxiter=500, fe.reg = T, fe.col = 1, fe.cutoff = 1.0e-8)
+gwr.poisson2<-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e-5, maxiter=500, fe.reg = F, fe.col = 1, fe.cutoff = 1.0e-8)
 {
     p4s <- as.character(NA)
     if (is(regression.points, "Spatial"))
@@ -863,8 +957,7 @@ gwr.poisson2<-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e-5,
                                         #betas.SE[i,]<-diag(Ci%*%t(Ci))
                 invwt2 <- 1.0 /as.numeric(wt2)
                 betas.SE[i,] <- diag((Ci*invwt2) %*% t(Ci))# diag(Ci/wt2%*%t(Ci))  #see Nakaya et al. (2005)
-            }
-            
+            }          
         }
         cat(paste("End of hatmatrix loop", Sys.time(), "\n"))
         tr.S<-sum(diag(S))
@@ -1125,7 +1218,7 @@ gwr.nbinomial.con <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=
             for (i in 1:dp.n) {
                 if (i>1 & any(rp.locat[i,] == rp.locat[i-1,])) {
                     bal[i] <- bal[i-1]
-                    bal_test[[i]] <<- bal_test[[i-1]]                    
+                    ##bal_test[[i]] <<- bal_test[[i-1]]                    
                 } else {
                     bal_fact <- optim(1,
                                       bal_obj_fn,
@@ -1139,13 +1232,13 @@ gwr.nbinomial.con <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=
                                       #upper = 50
                                       )
                     bal[i] <- bal_fact$par
-                    bal_test[[i]] <<- bal_fact$par                    
+                    ##bal_test[[i]] <<- bal_fact$par                    
                 }
             }
             x[,1] <- bal
             x.sub <- lapply(1:dp.n, function(i) x[gwr.sub[[i]], ])
         }
-        x_test <<- x.sub
+        ##x_test <<- x.sub
         repeat {
             ## calculate elements of Fisher Information matrix
             a <- mu / (1 + alpha * mu) +
@@ -1186,8 +1279,8 @@ gwr.nbinomial.con <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=
             }
             nu <- gw.fitted(x,betas1)
             mu <- exp(nu)
-            nu_test <<- nu
-            mu_test <<- mu
+            ##nu_test <<- nu
+            ##mu_test <<- mu
             ##betas_test <<- betas1
             ##x_test <<- x
             old.llik <- llik
@@ -1404,7 +1497,7 @@ gwr.nbinomial.con.old <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,
             for (i in 1:dp.n) {
                 if (i>1 & any(rp.locat[i,] == rp.locat[i-1,])) {
                     bal[i] <- bal[i-1]
-                    bal_test[[i]] <<- bal_test[[i-1]]
+                    ##bal_test[[i]] <<- bal_test[[i-1]]
                     ## update intercept
                     #x[i,1] <- bal[i]
                     ## update subset x
@@ -1422,7 +1515,7 @@ gwr.nbinomial.con.old <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,
                                       #upper = 50
                                       )
                     bal[i] <- bal_fact$par
-                    bal_test[[i]] <<- bal_fact$par
+                    ##bal_test[[i]] <<- bal_fact$par
                     ## update intercept
                     #x[i,1] <- bal[i]
                     ## update subset x
@@ -1432,7 +1525,7 @@ gwr.nbinomial.con.old <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,
             x[,1] <- bal
             x.sub <- lapply(1:dp.n, function(i) x[gwr.sub[[i]], ])
         }
-        x_test <<- x.sub
+        ##x_test <<- x.sub
         repeat{
             ## calculate elements of Fisher Information matrix
             a <- mu / (1 + alpha * mu) +
@@ -1473,8 +1566,8 @@ gwr.nbinomial.con.old <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,
             }
             nu <- gw.fitted(x,betas1)
             mu <- exp(nu)
-            nu_test <<- nu
-            mu_test <<- mu
+            ##nu_test <<- nu
+            ##mu_test <<- mu
             ##betas_test <<- betas1
             ##x_test <<- x
             old.llik <- llik
@@ -2070,25 +2163,29 @@ gwr.nbinomial.fe <- function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1
       res <- list(glms=alpha,SDF=SDF)
 }
 
-gwr.poisson.fe <-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e-5, maxiter=500, fe.reg = T, fe.col = 1, fe.cutoff = 10^-12)
+gwr.poisson.fe <-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e-5, maxiter=500, fe.reg = T, fe.col = c(1,3), fe.cutoff = 10^-12, run.global = F)
 {
     p4s <- as.character(NA)
     if (is(regression.points, "Spatial"))
     {
       p4s <- proj4string(regression.points)
     }
-    ############################################
-    ##Generalized linear regression
-    glms<-glm.fit(x, y, family = poisson()) 
-    null.dev <- glms$null.deviance
-    glm.dev <-glms$deviance
-    glm.pseudo.r2 <- 1- glm.dev/null.dev 
-    glms$pseudo.r2 <- glm.pseudo.r2
+############################################
+    if (run.global) {
+        ##Generalized linear regression
+        glms<-glm.fit(x, y, family = poisson())
+        null.dev <- glms$null.deviance
+        glm.dev <-glms$deviance
+        glm.pseudo.r2 <- 1- glm.dev/null.dev
+        glms$pseudo.r2 <- glm.pseudo.r2
+########change the aic
+        glms$aic <- glm.dev + 2*var.n
+        glms$aicc <- glm.dev + 2*var.n + 2*var.n*(var.n+1)/(dp.n-var.n-1)
+    } else {
+        glms <- NA
+    }
     var.n<-ncol(x)
     dp.n<-nrow(x)
-    ########change the aic
-    glms$aic <- glm.dev + 2*var.n
-    glms$aicc <- glm.dev + 2*var.n + 2*var.n*(var.n+1)/(dp.n-var.n-1)
     ############################################
     if(is(regression.points, "Spatial"))
     	 rp.locat<-coordinates(regression.points)
@@ -2108,7 +2205,7 @@ gwr.poisson.fe <-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e
     fe.col.name <- names(regression.points@data)[fe.col]   
     fe.col.frml <- paste(unlist(lapply(fe.col.name,
                                        function(x) paste0('factor(', x, ')'))),
-                         collapse = '+')
+                         collapse = '*')
     fe.cols <- grep('factor', colnames(x), value = T)
     iv.cols <- which(!grepl('factor', colnames(x)))
     x_index <- 1:dp.n
@@ -2125,33 +2222,50 @@ gwr.poisson.fe <-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e
             fe.sub.cols[[i]] <- fe.sub.cols[[i-1]]
             W1.sub[[i]] <- W1.sub[[i-1]]
             W2.sub[[i]] <- W2.sub[[i-1]]
-            x.sub[[i]] <- x.sub[[i-1]]
+            x.sub[[i]] <- x.sub[[i-1]]            
         } else {
             ## find subset of observations where weight > cutoff
             gwr.sub[[i]] <- which(W1.mat[,i] > fe.cutoff)
             ## find non-zero fixed effects and corresponding column indexes
-            fe.sub <- unlist(lapply(fe.col,
-                                      function(x) {
-                                          tmp <- unique(regression.points@data[gwr.sub[[i]], x])
-                                          paste0('factor(',
-                                                 names(regression.points@data)[x],
-                                                 ')', tmp)
-                                      }))
+            fe.tmp <- lapply(fe.col,
+                 function(x) {
+                     tmp <- sort(unique(regression.points@data[gwr.sub[[i]], x]))
+                     paste0('factor(',
+                            names(regression.points@data)[x],
+                            ')', tmp)
+                 })
+            ## ## create interaction effects
+            fe.sub <- unlist(lapply(seq_along(fe.tmp[[2]]),
+                 function(x) {
+                     if (x == 1) {
+                         c(fe.tmp[[1]], fe.tmp[[2]][-1])
+                     } else if (x > 1 & length(fe.tmp[[1]]) > 1) {
+                         paste(fe.tmp[[1]][-1], fe.tmp[[2]][x], sep = ':')
+                     }
+                 }))
             fe.sub.cols[[i]] <- which(fe.cols %in% fe.sub) + length(iv.cols)
+            ##fe.sub_test[[i]] <<- fe.sub
             ## subset weight matrix
             W1.sub[[i]] <- W1.mat[gwr.sub[[i]], i]
             W2.sub[[i]] <- W2.mat[gwr.sub[[i]], i]
             ## subset x and create dummy matrix, adjust if all points within one municipality
-            if (length(fe.sub) > 1) {
+            if (length(fe.tmp[[1]]) > 1) {
                 x.sub[[i]] <- cbind(x[gwr.sub[[i]], iv.cols],
                                     model.matrix(as.formula(paste0('~ ', fe.col.frml, '- 1')),
                                                  data = regression.points@data[gwr.sub[[i]], ]
                                                  )
-                                    )           
+                                    )
             } else {
                 x.sub[[i]] <- cbind(x[gwr.sub[[i]], iv.cols],
-                                    rep(1, nrow(x[gwr.sub[[i]],]))
-                                    )
+                                    model.matrix(
+                                        as.formula(
+                                            paste0('~ factor(',
+                                                   fe.col.name[2],
+                                                   ')'
+                                                   )
+                                        ),
+                                        data = regression.points@data[gwr.sub[[i]], ]
+                                    ))
             }
         }
     }
@@ -2180,9 +2294,6 @@ gwr.poisson.fe <-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e
                 warning = function(w) {
                     stop(paste('Ended with warning ', conditionMessage(w)))
                 })
-             ## gwsi<-try(gw_reg(x.sub[[i]],y.sub,W1.sub[[i]]*wt2.sub,hatmatrix=F,i))
-             ## str(gwsi)
-             ## if (inherits(gwsi, "try-error")) stop("Problem with solver")
              betas1[i,c(iv.cols, fe.sub.cols[[i]])]<-gwsi[[1]]
          }
      }
@@ -2264,10 +2375,14 @@ gwr.poisson.fe <-function(y,x,regression.points,W1.mat,W2.mat,hatmatrix,tol=1.0e
         #AICc <- -2*llik + 2*tr.S + 2*tr.S*(tr.S+1)/(dp.n-tr.S-1)  # This is generic form of AICc (TN)
         AIC <- gw.dev + 2*tr.S
         AICc <- gw.dev + 2*tr.S + 2*tr.S*(tr.S+1)/(dp.n-tr.S-1) 
-        #yss.g <- sum((y - mean(y))^2)
-        #gw.R2<-1-rss/yss.g; ##R Square valeu
-        #gwR2.adj<-1-(1-gw.R2)*(dp.n-1)/(edf-1) #Adjusted R squared valu
-        pseudo.R2 <- 1- gw.dev/null.dev
+        ##yss.g <- sum((y - mean(y))^2)
+        ##gw.R2<-1-rss/yss.g; ##R Square valeu
+        ##gwR2.adj<-1-(1-gw.R2)*(dp.n-1)/(edf-1) #Adjusted R squared valu
+        if (run.global) {
+            pseudo.R2 <- 1- gw.dev/null.dev
+        } else {
+            pseudo.R2 <- NA
+        }
         GW.diagnostic<-list(gw.deviance=gw.dev,AICc=AICc,AIC=AIC,pseudo.R2 =pseudo.R2)
         cat(paste("End of hatmatrix calculations", Sys.time(),  "\n"))
      }

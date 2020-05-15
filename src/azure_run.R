@@ -49,27 +49,31 @@ registerDoAzureParallel(cluster)
 getDoParWorkers() 
 
 ## load necessary data
-load('../output/sp_dt.Rdata')
+load('../output/sp_dt_l2018.Rdata')
 
 ## testing on a subset (comment out for full)
 sp_dt <- subset(sp_dt, dist <= 35)
 ##sp_dt <- subset(sp_dt, code_orig == unique(sp_dt@data$code_orig)[c(1,2)])
-##sp_dt <- subset(sp_dt, prov_nm %in% unique(sp_dt@data$prov_nm)[c(1:3)])
-
-
+##sp_dt <- subset(sp_dt, prov_nm %in% unique(sp_dt@data$prov_nm)[c(1)])
 
 ## add index and fold
 set.seed(123)
 sp_dt@data$index <- 1:length(sp_dt)
 sp_dt@data$V1_int  <-  as.integer(sp_dt@data$V1_int)
 n_folds <- 10
+n_reps <- 1
+rep_fold_grid <- expand.grid(seq(1,n_reps), seq(1, n_folds))
 ## create folds: make sure that they are evenly distributed within municipality of orig
-sp_dt@data$fold_i <- unlist(lapply(unique(sp_dt@data$code_orig),
+for (idx in seq(1,n_reps)) {
+    tmp <- unlist(lapply(unique(sp_dt@data$code_orig),
                                    function(x) {
                                        n <- nrow(subset(sp_dt@data, code_orig == x))
-                                       return(sample(rep(sample(1:n_folds), length.out = n)))
+                                       return(sample(rep(sample(1:n_folds),
+                                                         length.out = n)))
                                    })
-                           ) 
+                  )
+    sp_dt@data[, paste0('fold_', idx)]  <-  tmp
+}
 
 ## load updated gwr poisson functions
 source('gwr.poisson_upd.R')
@@ -86,12 +90,12 @@ road_distance <- subset(road_distance, o %in% sp_dt@data$code_orig & d %in% sp_d
 source('handy_functions.R')
 
 ## dependent (1) and independent (-1) variables
-model_vars <- c('V1', 'AANT_INW', 'dist_rd', 'nb', 'cent_rd')
+model_vars <- c('V1', 'AANT_INW', 'dist_rd', 'nb', 'cent_rd')[-4]
 
 ## find unique combinations of ind vars
 mods <- list()
 counter <- 1
-for (i in 1:4) {
+for (i in 1:3) {
     combs <- combn(model_vars[-1], i, simplify = F)
     for (j in 1:length(combs)) {
         mods[[counter]] <- combs[[j]]
@@ -99,46 +103,24 @@ for (i in 1:4) {
     }
 }
 
-## combination of band width and model type
-## mods_bw <- expand.grid(seq(140, 200, by = 1),
-##                         c(5, 11, 12, 15)
-##                         )
-
-## for bisquare
-## mods_bw <- expand.grid(seq(300, 360, by = 1),
-##                          c(5, 11, 12, 15)
-##                        )
-
-## remove from grid
-removal_conditions <- "(Var1 %in% c('bisquare', 'tricube') & Var2 < 65)"
-removal_conditions <- paste(removal_conditions,
-                            "(Var1 %in% c('boxcar') & Var2 < 65)",
-                            sep = "|")
-removal_conditions <- paste(removal_conditions,
-                            "(Var1 %in% c('gaussian') & Var2 > 200)",
-                            sep = "|")
-removal_conditions <- paste(removal_conditions,
-                            "(Var1 %in% 'boxcar' & Var2 > 300)",
-                            sep = "|")
-
-## grid with kernel type and size
-kernel_bw <- data.table(expand.grid(c('gaussian', 'bisquare', 'tricube', 'boxcar')[2],
-                                    c(seq(65, 100, by = 10)))
-                        )[!eval(parse(text=removal_conditions)),
-                          ]
-
+## kernel and bandwidth
+##kernel_bw <- data.table(Var1 = 'bisquare', Var2 = seq(300, 1200, by = 10))
+kernel_bw <- data.table(Var1 = 'bisquare', Var2 = seq(1050, 1200, by = 1))
 
 ## check residuals and obtain parameters with non-gwr model
-glm_global <- glm(fmla(model_vars, 'poisson.fe'), 'poisson', sp_dt@data) 
+##glm_global <- glm(fmla(model_vars, 'poisson.fe'), 'poisson', sp_dt@data) 
 ## glm.nb_global <- glm.nb(fmla(model_vars, 'nbinomial.fe'), sp_dt@data) 
 ## summary(data.table(cbind(sp_dt@data$V1_int, fitted(glm_global)))[, V1 - V2])
 ## summary(data.table(cbind(sp_dt@data$V1_int, fitted(glm.nb_global)))[, V1 - V2])
-hat_matrix <- influence(glm_global)$hat
+## hat_matrix <- influence(glm_global)$hat
 
 ## Azure options create name, prevent R session from being open and waiting for results
-my_job_id <- "ga-test-3"
+my_job_id <- "panel-run-estimate2"
 #setAutoDeleteJob(TRUE)
-opt <- list(job = my_job_id, wait = FALSE, autoDeleteJob = TRUE, enableCloudCombine = FALSE, maxTaskRetryCount = 1)
+opt <- list(job = my_job_id, wait = FALSE, autoDeleteJob = TRUE,
+            enableCloudCombine = FALSE, maxTaskRetryCount = 0,
+            chunkSize = 1)
+#            chunkSize = floor(nrow(kernel_bw) / 13))
 
 ## euclidian or road for weight matrix
 euclidian_distance <- TRUE
@@ -146,13 +128,10 @@ euclidian_distance <- TRUE
 ## 10-fold cross validation or not
 cv_run <- FALSE
 
-source('gwr.poisson_upd.R')
-
 job_id <- foreach(
-    ##k = seq(1, nrow(kernel_bw))
-    k = seq(1, nrow(kernel_bw))[1],
-     .packages = c('sp', 'raster', 'GWmodel', 'data.table', 'rgenoud'),
-     .options.azure = opt
+    k = seq(1, nrow(kernel_bw))[131],
+    .packages = c('sp', 'raster', 'GWmodel', 'data.table', 'rgenoud'),
+    .options.azure = opt
 ) %dopar% {
     ## set model type
     ##i = c('ols', 'mle')
@@ -201,15 +180,15 @@ job_id <- foreach(
        ##  )
     } else {
         message(paste('Calculate BW MLE, time:', Sys.time()))
-        #best_bw <- unlist(kernel_bw[k,2])
-        best_bw <- tryCatch({
-            bw.ggwr2(fmla(model_vars, mdl),
-                    data = sp_dt, adaptive = T, dMat = dist_m,
-                    approach = 'cv', kernel = j, family = mdl,
-                    f.bw = unlist(kernel_bw[k, 2]))
-        },
-        error = function(e) message(paste0('Error in BW calculation:', e))
-        )
+        best_bw <- unlist(kernel_bw[k,2])
+        ## best_bw <- tryCatch({
+        ##     bw.ggwr2(fmla(model_vars, mdl),
+        ##             data = sp_dt, adaptive = T, dMat = dist_m,
+        ##             approach = 'cv', kernel = j, family = mdl,
+        ##             f.bw = unlist(kernel_bw[k, 2]))
+        ## },
+        ## error = function(e) message(paste0('Error in BW calculation:', e))
+        ## )
     }
     ## if na result return optimal bw from gaussian
     if(!is.null(best_bw)) {
@@ -239,37 +218,53 @@ job_id <- foreach(
                 vars <- list()
                 params <- list()
                 preds <- list()
-                for (fld in 1:n_folds) {
-                    cat(paste0('Now estimating fold ', fld, '\n'))
+                for (idx in seq(1, 5)) {
+                    yr <- seq(2012,2016)[idx]
+                    ## set bandwidth relative to 2018
+                    bw_yr <- (yr-2012+1)/(2018-2012+1)
                     ## training data set: training data everything except this fold
-                    train <- subset(sp_dt, fold_i != fld)
-                    test <- subset(sp_dt, fold_i == fld)
+                    fld <- rep_fold_grid[idx, 'Var2']
+                    rep_var <- paste0('fold_', rep_fold_grid[idx, 'Var1'])
+                    message(paste('Now estimating fold',
+                                   idx,                                  
+                                  Sys.time(),
+                                   '\n'))
+                    ## train <- subset(sp_dt, eval(parse(text = rep_var)) != fld)
+                    ## test <- subset(sp_dt, eval(parse(text = rep_var)) == fld)
+                    train <- subset(sp_dt, year <= yr)
+                    test <- subset(sp_dt, year == yr + 1)
+                    model_formula <- ifelse(idx == 1,
+                                            fmla(model_vars, mdl, year_dummy = FALSE),
+                                            fmla(model_vars, mdl)
+                                            )
+                    print(model_formula)
                     ## estimate gwr model on training data
-                    out[[fld]] <- ggwr.basic2(fmla(model_vars, mdl),
-                                       data = train, bw = best_bw,
+                    ##source('gwr.poisson_upd.R')
+                    out[[idx]] <- bw.ggwr2(model_formula,
+                                       data = train, f.bw = round(bw_yr*best_bw),
                                        dMat = dist_m[train@data$index, train@data$index],
                                        kernel = j, adaptive = T,
-                                       cv = F, family = mdl, no.hatmatrix = TRUE,
-                                       theta_g = glm.nb_global$theta, null.dev = glm.nb_global$null.deviance
-                                       )$SDF@data                   
+                                       family = mdl, approach = 'kfold.cv'
+                                       )
+                    message(paste('Finished estimating model:', Sys.time()))
                     ## gather parameters for each municipality 
-                    params[[fld]] <- unique(cbind(code_orig = train@data$code_orig,
-                                                  out[[fld]][,-c(seq(ncol(out[[fld]]),
-                                                                     ncol(out[[fld]])-2))],
-                                                  fld)
-                                            )                   
+                    params[[idx]] <- unique(cbind(code_orig = train@data$code_orig,
+                                                  out[[idx]][,-c(seq(ncol(out[[idx]]),
+                                                                     ncol(out[[idx]])-2))],
+                                                  idx)
+                                            )
                     ## selection of output
-                    out[[fld]] <- cbind(code_orig = train@data$code_orig,
-                                      out[[fld]][, c('y', 'yhat', 'residual')],
-                                      fld
+                    out[[idx]] <- cbind(code_orig = train@data$code_orig,
+                                      out[[idx]][, c('y', 'yhat', 'residuals')],
+                                      idx
                                       )
                     ## ## calculate prediction errors
-                    ivars <- unlist(lapply(names(params[[fld]]),
+                    ivars <- unlist(lapply(colnames(params[[idx]]),
                                            function(x) grep('log', x, value = T))
                                     )
-                    names(params[[fld]])[names(params[[fld]]) %in% ivars] <- gsub('log\\(', 'V_', gsub('\\)', '', ivars))
-                    preds[[fld]] <- setDT(merge(test@data[, c(1:9)],
-                                                params[[fld]][, c(1:5)],
+                    colnames(params[[idx]])[colnames(params[[idx]]) %in% ivars] <- gsub('log\\(', 'V_', gsub('\\)', '', ivars))
+                    preds[[idx]] <- setDT(merge(test@data[, c(1:10)],
+                                                params[[idx]][, c(1:5)],
                                                 by = 'code_orig'
                                                 ))[,
                                                    pred_denom := sum(eval(parse(text = gravity_vars(model_vars[-1], 'mle_cv'))), na.rm = T),
@@ -279,18 +274,38 @@ job_id <- foreach(
                                                      by = code_orig
                                                      ][,
                                                        ':=' (
-                                                           fold = fld,
-                                                           rmse_f = rmse(V1, prediction),
-                                                           mae_f = mae(V1, prediction)
+                                                           fold = idx,
+                                                           bw = best_bw,
+                                                           kernel = j,
+                                                           oos_rmse = rmse(V1, prediction),
+                                                           oos_mae = mae(V1, prediction),
+                                                           ws_rmse = sqrt(mean(out[[idx]][, 'residuals']^2)),
+                                                           ws_mae = mean(abs(out[[idx]][, 'residuals']))
                                                        )]
                 }
-                pred_errors <- rbindlist(preds)[, .(unique(rmse_f), unique(mae_f)), by = fold]
+                pred_errors <- unique(rbindlist(preds)[,
+                                                       .(fold,
+                                                         rep_var,
+                                                         bw,
+                                                         kernel,
+                                                         oos_rmse,
+                                                         oos_mae,
+                                                         ws_rmse,
+                                                         ws_mae
+                                                         )])
+                message(paste('Finished CV run:', Sys.time()))
             } else {
-                message(paste('Estimating model', fmla(model_vars, i)))
+                message(paste('Estimating model', fmla(model_vars, mdl)))
                 if (mdl == 'poisson.fe') {
-                    ggwr.basic2(fmla(model_vars, mdl),
+                    print(best_bw)
+                    ## out <- ggwr.basic2(fmla(model_vars, mdl),
+                    ##    data=sp_dt, bw = best_bw, dMat = dist_m, maxiter = 50, 
+                    ##    kernel = j, adaptive = T, family = mdl, no.hatmatrix = FALSE,
+                    ##    cv = F
+                    ##    )
+                    out <- ggwr.basic2(fmla(model_vars, 'poisson'),
                        data=sp_dt, bw = best_bw, dMat = dist_m, maxiter = 50, 
-                       kernel = j, adaptive = T, family = mdl, no.hatmatrix = FALSE,
+                       kernel = j, adaptive = T, family = 'poisson', no.hatmatrix = FALSE,
                        cv = F
                        )
                 } else {
@@ -307,23 +322,36 @@ job_id <- foreach(
     }
     #message(paste('End:', Sys.time()))
     if (!cv_run) {
-        return(list(best_bw, mod$SDF@data))
+        return(list(mod$SDF@data, j, best_bw))
     } else if (cv_run) {
         ##return(list(out, params, k, best_bw, kernel_bw[k, ], preds))
-        return(list(k, kernel_bw[k], pred_errors))
-   }
+        return(pred_errors)
+    }
 }
+
+rbindlist(lapply(job_id,
+       function(x) {
+           x[,
+             lapply(.SD, function(x) return(c(mean(x), sd(x)))),
+             .SDcols = c('oos_rmse', 'oos_mae', 'ws_rmse', 'ws_mae'),
+             by = c('bw', 'kernel')
+             ][,
+               variable := c('mean', 'sd')
+               ]
+       }))
+
 
 ## does constraint hold?
 lapply(1:length(job_id),
        function(x) {
            data.table(sp_dt@data$code_orig,
+                      sp_dt@data$year,
                       ##sp_dt@data$age_group,
-                      job_id[[x]]$y,
-                      job_id[[x]]$yhat
+                      job_id[[x]][[1]]$y,
+                      job_id[[x]][[1]]$yhat
                       )[,
-                        sum(V3) - sum(V2),
-                        by = V1
+                        sum(V4) - sum(V3),
+                        by = c('V1', 'V2')
                         ]
        })
 
@@ -331,152 +359,42 @@ lapply(1:length(job_id),
 ## quick out-of-sample check
 
 ## gather results
-result <- getJobResult(job_id)
+result <- getJobResult(my_job_id)
+
+ggplot(rbindlist(result)[,
+                         .(mean(oos_rmse),
+                           mean(oos_rmse) + sd(oos_rmse) / sqrt(5),
+                           mean(oos_rmse) - sd(oos_rmse) / sqrt(5)
+                           ),
+                         by = bw
+                         ],
+       aes(bw, V1)) +
+    geom_ribbon(aes(ymax = V2, ymin = V3), fill = 'grey') + 
+    geom_line() +
+    theme_bw()
+
 
 ## saveRDS(result, file = '../output/gwr_poisson_nbinomial_result.rds')
 
-## postprocessing of results from tuning
-##job_name <- c("gwr-poisson-tuning", "gwr-nbinomial-tuning")[2]
-job_name <- my_job_id
-files <- subset(listStorageFiles(job_name, prefix = "results"),
-                nchar(as.character(ContentLength)) > 4)
+ggplot(rbindlist(result)[,mean(oos_rmse),by=bw], aes(bw,V1)) +
+    geom_line() +
+    theme_bw()
 
-storageFiles <- azure_storagefile_list(files, job_name)
-
-## calculate mae and rmse
-my_job_id <- "calculate-errors-eureka-13"
-#setAutoDeleteJob(TRUE)
-opt <- list(job = my_job_id, wait = FALSE, autoDeleteJob = TRUE,
-            enableCloudCombine = FALSE, maxTaskRetryCount = 0
-            )
-
-## run postprocessing job: NB remove large stuff from session
-result <- foreach(
-    ## dummy index
-    idx = 1,   
-    .packages = c('sp', 'raster', 'GWmodel', 'data.table'),
-    .options.azure = opt
-) %dopar% {
-    ## download files
-    temp_dir <- tempdir(check=T)
-    ## download files from storage to temporary directory    
-    for (i in 1:length(storageFiles)) {
-        download.file(storageFiles[[i]],
-                      destfile = paste0(temp_dir, gsub("results/", "/", files[[1]][i]))
-                      )        
-    }
-    ## cross validation over models or over kernels
-    cv_type <- c('kernel', 'model')[idx]
-    ## read in files 
-    result <- lapply(list.files(temp_dir),
-                     function(x) {
-                         readRDS(paste(temp_dir, x, sep = '/'))
-                     })
-    ## remove temporary directory
-    unlink(temp_dir,force=T)
-    ## create model matrix for all models or kernels
-    if (cv_type == 'model') {
-        dt2 <- lapply(unique(kernel_bw$Var1),
-                  function(x) {
-                      vars <-  mods[[x]]
-                      frml <- paste0('~', paste(paste0('log(', vars,')'), collapse = '+'),
-                                     '+factor(code_orig)-1')
-                      out <- data.table(code_orig = sp_dt@data$code_orig,
-                                        fold_i = sp_dt@data$fold_i,
-                                        model.matrix(as.formula(frml),
-                                                     data = sp_dt@data
-                                                     )
-                                        )
-                      setkey(out, code_orig, fold_i)
-                      return(out)
-                  })
-    } else if (cv_type == 'kernel') {
-        vars <-  mods[[15]]
-        frml <- paste0('~', paste(paste0('log(', vars,')'), collapse = '+'),
-                       '+factor(code_orig)-1')
-        dt2 <- data.table(code_orig = sp_dt@data$code_orig,
-                          fold_i = sp_dt@data$fold_i,
-                          model.matrix(as.formula(frml),
-                                       data = sp_dt@data
-                                       )
-                          )
-        setkey(dt2, code_orig, fold_i)
-    }
-    ## calculate rmse and mae
-    pred_errors <- lapply(seq_along(result),
-                          function(x) {                             
-                              ## find row number of input grid
-                              ## k <- result[[x]][[3]] ## for local run
-                              k <- result[[x]][[1]][[3]]
-                              ## kernel name and index
-                              kernel_type <- paste(unlist(kernel_bw[x, 1]))
-                              dt2_index <- grep(kernel_type,
-                                                paste(unlist(unique(kernel_bw[,1]))))
-                              ## for out of sample err: gather parms for each fold
-                              dt1 <- setDT(merge(sp_dt@data[,
-                                                      c('code_orig',
-                                                        'fold_i')
-                                                      ],
-                                           rbindlist(result[[x]][[1]][[2]]),
-                                           ## rbindlist(result[[x]][[2]]), ## for local run
-                                           by.x = c('code_orig',  'fold_i'),
-                                           by.y = c('code_orig',  'fld')
-                                           ))
-                              setkey(dt1, code_orig, fold_i)                            
-                              ## out of sample predictions
-                              if (cv_type == 'model') {
-                                  os_pred <- exp(apply(dt1[,-c(1,2)] * dt2[[dt2_index]][,-c(1,2)],
-                                                   1,
-                                                   sum))
-                              } else if (cv_type == 'kernel') {
-                                  os_pred <- exp(apply(dt1[,-c(1,2)] * dt2[,-c(1,2)],
-                                                   1,
-                                                   sum))
-                              }
-                              ## calculate within sample errors
-                              ws_err <- rbindlist(result[[x]][[1]][[1]]
-                              ##  ws_err <- rbindlist(result[[x]][[1]], ## for local run
-                                                  )[,
-                                                     .(rmse = sqrt(mean(residual^2)),
-                                                       mae = mean(abs(residual))
-                                                       ),
-                                                     by = fld
-                                                     ]
-                              return(
-                                  data.table(predicted = os_pred,
-                                             actual = sp_dt@data$V1_int,
-                                             fold = sp_dt@data$fold_i
-                                             )[, ## calculate mse and mae
-                                               .(sqrt(mean((predicted - actual)^2)),
-                                                 mean(abs(predicted - actual))
-                                                 ),
-                                               by = fold
-                                               ][, ## return mean and se of mse and mae
-                                                 .(idx = k,
-                                                   kernel = unlist(kernel_bw[k, 1]),
-                                                   bw = unlist(kernel_bw[k, 2]),
-                                                   mean_rmse_oos = mean(V1),
-                                                   se_rmse_oos = sd(V1)/sqrt(.N),
-                                                   mean_mae_oos = mean(V2),
-                                                   se_mae_oos = sd(V2)/sqrt(.N),
-                                                   mean_rmse_ws = mean(ws_err$rmse),
-                                                   se_rmse_ws = sd(ws_err$rmse)/sqrt(.N),
-                                                   mean_mae_ws = mean(ws_err$mae),
-                                                   se_mae_ws = sd(ws_err$mae)/sqrt(.N)
-                                                   )
-                                                 ]
-                              )
-                          })
-    return(rbindlist(pred_errors))
-}
-
-pred_errors <- getJobResult("calculate-errors-eureka-13")
-
-pred_errors[[1]][mean_rmse_oos == min(mean_rmse_oos)]
-## old
+rbindlist(result)[, mean(oos_rmse), by = bw]
 
 
-ggplot(rbindlist(pred_errors), aes(bw, mean_rmse_oos)) +
+pred_errors <- rbindlist(lapply(job_id,
+       function(x) {
+           x[,
+             lapply(.SD, function(x) return(c(mean(x), sd(x)))),
+             .SDcols = c('oos_rmse', 'oos_mae', 'ws_rmse', 'ws_mae'),
+             by = c('bw', 'kernel')
+             ][,
+               variable := c('mean', 'sd')
+               ]
+       }))
+
+ggplot(pred_errors[variable == 'mean'], aes(bw, oos_rmse)) +
     geom_line() +
     theme_bw()
 

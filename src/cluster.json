@@ -1,6 +1,6 @@
 {
-    "name": "gwr",
-    "vmSize": "Standard_F72s_v2",
+    "name": "gwr1",
+    "vmSize": "Standard_E48_v3",
     "virtualMachineConfiguration": {
         "imageReference": {
             "publisher": "Canonical",
@@ -18,7 +18,7 @@
         },
         "lowPriorityNodes": {
             "min": 1,
-            "max": 13
+            "max": 20
         },
         "autoscaleFormula": "QUEUE_AND_RUNNING"
     },

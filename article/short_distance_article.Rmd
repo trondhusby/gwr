@@ -1,0 +1,388 @@
+---
+title: "On the estimation of a gravity model for regional population projections: a geographically weighted Poisson regression with fixed effects"
+author: "Trond Husby, Andries de Jong"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+
+output:
+  bookdown::pdf_document2:
+    toc: FALSE
+    includes:
+      in_header: my_header.tex
+    
+bibliography: short_distance_bib.bib 
+---
+
+```{r system-settings, include = F}
+
+## house keeping
+library(rmarkdown)
+library(knitr)
+library(rgdal)
+library(maptools)
+library(rgeos)
+library(spdep)
+library(sp)
+library(sf)
+library(doAzureParallel)
+library(rAzureBatch)
+library(GWmodel)
+library(ggplot2)
+library(raster)
+library(data.table)
+library(viridis)
+library(gridExtra)
+
+## set global rchunk options
+opts_chunk$set(fig.path='../figs/gwr--',
+               cache.path='../cache/gwr-',
+#               fig.show='hold',
+               results='hide',
+               message=FALSE,
+               warning=FALSE,
+               echo=FALSE,
+               par=TRUE )
+
+```
+
+```{r read-data, include = F, cache = T}
+
+## read spatial data
+epsg <- data.table(make_EPSG())
+reg_data_dir <- '/home/trond/Documents/CLAiR-City_data/RegionalData/'
+gem_nl <- read_sf(paste0(reg_data_dir, 'buurt_en_wijk_kaarten/2018/'), 'gemeente_2018_v2')
+gem_nl <- st_transform(gem_nl, epsg[code == 7415, prj4]) # set RDS planar projection
+## clean up mun code
+gem_nl$code <- as.numeric(gsub('GM', '', as.character(gem_nl$GM_CODE)))
+
+## read input data
+load('../output/sp_dt_l2018.Rdata')
+
+## read test data
+test_dt <- readRDS('../output/test_dt_l2018.rds')
+
+## ## login
+system('az login')
+
+## ## after filled in set credentials
+setCredentials("../src/credentials.json")
+
+## ## read cv results
+cv_job_id <- "panel-run-cv5"
+results_cv <- getJobResult(cv_job_id)
+
+```
+
+# Introduction
+
+Internal migration is the most uncertain and the most important element of a regional population projection model. Due to falling birth and death rates, fluctuations in the regional population largely follows fluctuations in migration. While top-down models treat internal migration in a fairly rudimentary way, bottom-up models include bilateral migration flows as well as its underlying drivers. This paper reports on the estimation of a gravity model used for the tri-annual regional population projections of the Netherlands Environmental Assessment Agency (PBL) and Statistics Netherlands (CBS).
+
+The workhorse on the regional population projections of CBS and PBL is the cohort-component model PEARL. This is a bottom-up demographic model where internal migration flows between all Dutch municipalities is modelled through a combination of time series forecasting and explicit representation of the migration process. As is common in the demographic literature, a distinction is made between long- and short-distance migration: while the former is primarily motivated by family and job and is fairly stable in time, short-distance migration which is often motivated by housing-market is much more volatile. For this reason, in PEARL long-distance migration is projected with trend extrapolation while short-distance migration is modelled explicitly.
+
+The question is how much detail to include in the modelling of short-distance migration. On the one hand, the inclusion of additional explanatory variables could certainly improve model fit and predictive power. On the other hand, a projection requires that all explanatory variables themselves can be forecasted and that their relationship with the independent variables does not change through time. As is well known in the literature, it turns out that simpler models often offer more robust projections than more complicated ones. For PEARL we use one of the classics from the literature; namely the origin-constrained gravity model.
+
+Constrained gravity models, as discussed in @wilson1971family, extend the traditional gravity models by constraining the estimated parameter values such that estimated flows  match the observed total flows. For example, origin-constrained models ensure that the estimated total flows from each origin are match the observed total flows. This is of course a very useful feature in predictive analysis. A further extension was provided by @fotheringham1983new, who introduced the competing destination framework to improve the treatment of destination interdependence. Destination interdependence is incorporated in the model through a centrality variable relating the attractiveness of a destination to that of other potential destinations.
+
+In terms of estimation strategy, the most straightforward procedure for the basic gravity model is log-linearisation of both the left- and the right-hand-side and estimation with OLS. The single-constrained gravity models require some additional rewriting of the terms in order to properly account for the constraints [@fotheringham1989spatial]. However, as perhaps most clearly explained by @silva2006log in the context of gravity models of trade, the parameters of log-linearised models estimated by OLS are biased in the context of heteroskedasticity. A simple solution to this problem had already been proposed by @flowerdew1982method; namely to estimate the gravity model using Poisson regression. Constraints can captured in the Poisson regression model by including fixed effects @davies1987statistical.
+
+Another issue with estimation is potential non-stationarity of parameters [@fotheringham1997measuring]. In the context of a gravity model of migration it is entirely conceivable that some relationship differ across space. This may be due to differences in population composition, spatial variation in attitudes or other contextual issues, or simply a result of variations in spatial structure[@fotheringham1983some]. For example, @nakaya2001local found a much stronger distance decay effect in urban regions than in peripheral ones, suggesting that the degree to which distance deters migration increases with the degree of urbanisation. One of the most well-known estimation procedures for such models is Geographically Weighted Regression (GWR) [@brunsdon1996geographically].
+
+Although GWR has been used to estimate constrained gravity models [@nakaya2001local; @kalogirou2016destination], the simple fixed-effects Poisson regression method has to our knowledge never been applied. Furthermore, usage of panel data in the literature is scant. For our purpose - namely the usage in a projection model - both of these features are essential: by interacting regional and yearly fixed effects we effectively estimate parameters subject to a constraint each year. The resulting parameters capture spatial variation subject to the restrictions imposed by the fixed effects. 
+
+In this paper we propose a method for estimating an origin-constrained gravity model of the competing destination flavour, using geographically weighted Poisson regression (GWPR) with fixed effects on panel data. The method is applied to estimate short-distance migration flows (less than 35 km) between 380 Dutch municipalities in the period 2012 to 2017. Since our primary concern here is projections, we evaluate the predictive perfmance of the model on a hold-out sample.
+
+Section 1 discusses 
+
+# Methodology
+
+The topic of this paper relates to spatial interactions, which can be described broadly as any observed (aggregate) flows over space resulting from decisions. Therefore, spatial interaction modelling generally tries to explain geographical flows emanating from individual decision process, rather than the decision processes themselves. This type of models can be employed to examine the characteristics of destinations that experience large inflows of migrants. And, of relevance for this paper, they can be used to make statements on the relative importance of these characteristics and how it varies between origins. 
+
+One popular type of spatial interaction models is the gravity model. As the name suggests this model takes its inspiration from physics, depicting the strength of a relationship between two objects as a function of the mass of the two and the distance between them. The gravity model is widely used to study directional graphs such as the migration and trade flows and trips to retail locations. For the analysis of migration flows $M_{i,j}$ is an $n \times (n-1)$ matrix representing the number of individuals who moved from location $i$ to location $j$, where $i \neq j$.
+
+A basic gravity model of migration can be formulated using only population at destination $P_{j,t}$ and the distance between origin and destination, $D_{i,j,t}$ as explanatory variables. In this model, the population at destination is a general measure of the attractivenes of $j$ as a destination and must therefore be understood as a proxy for a range of other factors that influences the destination choice. The distance between origin and destination has a deterring effect on all kinds of spatial interaction: all else being equal, interaction is less intense when origin and destination are far apart than when they are near each other. 
+
+
+## The competing destinations gravity model
+
+As discussed in the literature (REF!), a shortcoming in the basic gravity model is that it does not properly capture the effects of spatial structure. The competing destinations framework, as formulated in @fotheringham1983new, is an answer to this critique, where the dependency between destinations are modelled with a centrality variable $C_{i,j,t}$. 
+
+$$
+C_{i,j,t} = \sum_{k=1; k \ne i; k \ne j} \frac{P_{k,t}}{D_{j,k,t}}
+$$
+
+Note that we interpreted $P_{j}$ as a measure of the attractiveness (mass) of the destination $j$. The centrality measure specified as above then represents the attractiveness of other destinations weighted with the distance to $j$. A high value of $C_{i,j,t}$ consequently means that destination $j$ is located in a cluster of attractive competing destinations.
+
+## The origin-specific gravity model estimated using Geographically Weighted Regression
+
+Instead of estimating the gravity model on the entire data set, it is quite common to estimate separate models for each origin [@fotheringham1998geographically], sometimes referred to as origin-specific parameterisation. As argued in @fotheringham1983some, there are good reasons to expect spatial variation in parameter estimates in the setting of competing destination: the distance decay parameter of relatively accessible origins should, in general, be less negative than that of inaccessible origins. 
+
+One potential weakness with this approach is that the data set used for each origin-specific model becomes defined by administrative boundaries. In our case this is problematic since the cut-off scheme between long and short-distance migration is the same for the entire sample. Consequently, the origin-specific parameterisation is problematic in certain origins as the reduction in sample size amplifies the effect of influential observations.
+
+Our solution is to define an optimal neighbourhood around each origin using Geographically Weighted Regression. GWR is a non-parametric technique is primarily used for exploring spatial non-stationarity. This technique thus allows for investigating whether the strength of a (statistical) relationship varies between locations in a spatial data set. Essentially, GWR measures the relationships around the geographical location of an observation in the data set, where each set of parameters is estimated by weighted least square. GWR is distinguished by weights being based on distance between regression points.
+
+The final model with three explanatory variables and origin-specific parameters can be written as follows:
+
+$$
+\begin{aligned}
+& M_{i,j,t} = O_{i,t}A_{i,t}P_{j,t}^{\beta_{P}(\mathbf{u}_{i})}D_{j}^{\beta_{D}(\mathbf{u}_{i})}C_{i,j,t}^{\beta_{C}(\mathbf{u}_{i})} \\
+& O_{i,t} = \sum_{j} M_{i,j,t} \\
+& A_{i,t} = \left( \sum_{j}P_{j,t}^{\beta_{P}(\mathbf{u}_{i})}D_{i,j}^{\beta_{D}(\mathbf{u}_{i})}C_{i,j,t}^{\beta_{C}(\mathbf{u}_{i})} \right)^{-1}
+\end{aligned}
+ (\#eq:gravity)
+$$
+
+The origin-constraint is written as $O_{i,t}$, while the balancing factior $A_{i,t}$ is included to ensure that the model reproduces flows originating at $i$. Formulated as a Poisson regression model, we operationalise the origin constraint using region-specific effects $\gamma_{i}$ and time-specific effects $\tau_{t}$.
+
+$$
+ \lambda_{i,j,t}(\mathbf{u}_{i}) = \exp \left( \gamma_{i} \tau_{t} +
+\beta_{P}(\mathbf{u}_{i})P_{j,t} +
+\beta_{D}(\mathbf{u}_{i})D_{i,j,t} +
+\beta_{C}(\mathbf{u}_{i})C_{i,j,t}
+\right)
+$$
+
+
+## Fixed effects and Geographically Weighted Poisson Regression
+
+One main reason behind the popularity of the gravity model is that it is easily log-linearised, whereby the parameters can be estimated using OLS. As widely recognised in the literature, the log-normal specification is problematic. Firstly, the log-normal model is unable to deal with zero-valued migration flows, since the logarithm of zero is undefined [@burger2009specification]. Secondly, the logarithmic transformation of $M_{ij}$ has an effect on the estimation process, whereby the antilogarithms of the estimates $\hat{\log{M_{ij}}}$ tend to be biased, leading to under-predicting of large flows and total flows [@flowerdew1982method; @silva2006log]. A solution to both of these problems is to estimate a regression model based on discrete distributions such as Poisson. 
+
+Although it is well established that the fixed effects of a Poisson regression model ensure that constraints hold, it is not immediately obvious that the same holds true for a GWPR model. In this section we show that the origin-constraints follow naturally from the maximum likelihood estimation, also with the GWPR.
+
+Consider the migration flow between municipality $i$ and $j$, $M_{i,j}$ (the time index is supressed for now). A gravity model with $k$ explanatory variables $x_{k,i,j}$ can be represented as a Poisson regression model as follows [@nakaya2005geographically]:
+
+$$
+M_{i,j} \sim \text{Poisson} \left[ \exp \left( \sum_{k} \beta_{k} x_{k,i,j} \right) \right]
+$$
+
+In this formulation $\beta_{k}$ are estimated parameters and Poisson $\left[ \lambda \right]$ indicates a Poisson distribution with mean $\lambda$. We can then adopt the more common formulation used by @flowerdew1982method:
+
+$$
+\lambda_{i,j} = \exp \left( \sum_{k} \beta_{k} x_{k,i,j} \right)
+$$
+
+
+Following this formulation, we see that an origin constraint implies that the estimated flows summed over destinations must be the same as the observed flows summed over destinations, for all origins.
+
+$$
+\sum_{j} \hat{\lambda}_{i,j} = \sum_{j} M_{i,j}
+$$
+
+Constraints (single or double) can be operationalised by specifying some of the $x_{k,i,j}$ explanatory variables as dummy variables corresponding to fixed effects. 
+
+The GWPR formulation of this model is similar, but now we let the parameters vary according to the geographical location of the origin, $\mathbf{u}_{i} = u_{x,i}, u_{y,i}$. We can write the geographically weighted Poisson Regression as 
+
+$$
+\lambda_{i,j}(\mathbf{u}_{i}) = \exp \left( \sum_{k} \beta_{k}(\mathbf{u}_{i}) x_{k,i,j} \right)
+$$
+
+and the origin-constraint can be written as
+
+$$
+\sum_{j} \hat{\lambda}_{i,j}(\mathbf{u}_{i}) = \sum_{j} M_{i,j}
+$$
+
+The model is estimated by maximising a log-likelihood function written as
+
+$$
+\ell = \sum_{i} \sum_{j} \left[ M_{i,j} \sum_{k} x_{k,i,j} \beta_{k}(\mathbf{u}_{i}) - \exp \left( \sum_{k} x_{k,i,j} \beta_{k}(\mathbf{u}_{i}) \right) \right]
+$$
+
+The derivative of the log-likelihood with respect to the $v$th structural parameter is
+
+$$
+\frac{\partial \ell }{\partial \beta_{v}(\mathbf{u}_{i})} = \sum_{i} \sum_{j} x_{k,i,j} \left[ M_{i,j} - \exp \left( \sum_{k} x_{k,i,j} \beta_{k}(\mathbf{u}_{i}) \right) \right]
+$$
+
+In order to represent fixed effects, we let the $r$th explanatory variable be a dummy variable equal to one if $i = I$ and zero otherwise. The derivative of the log likelihood function with respect to the $r$th structural parameter is
+
+$$
+\frac{\partial \ell }{\partial \beta_{r}(\mathbf{u}_{I})} = \sum_{j} \left[ M_{I,j} - \exp \left( \sum_{k} x_{k,I,j} \beta_{k}(\mathbf{u}_{I}) \right) \right]
+$$
+
+The maximum likelihood obviously implies that all derivatives are zero. By plugging in the maximum likelihood estimates of the parameters $\hat{\beta}_{k}(\mathbf{u}_{I})$, we see that the origin-constraint holds for region $I$
+
+$$
+\sum_{j} M_{I,j} = \sum_{j} \exp \left( \sum_{k} x_{k,I,j} \hat{\beta}_{k}(\mathbf{u}_{I}) \right) = \sum_{j} \hat{\lambda}_{i,j}(\mathbf{u}_{I})
+$$
+
+It is easy to see that this generalises for all other $i$. In a panel data setting, we see that a dummy variable of region interacted with dummy variable representing each year operationalises origin constraints for each time period. Note that this likelihood function is somewhat simpler than the local likelihood presented in @nakaya2005geographically; the same argument applies to that case too.
+
+# Case study 
+
+The Netherlands is a small and densely populated country with good transport infrastructure. The population is concentrated within the Randstad area which covers the urban agglommerations of the four big cities (Amsterdam, Utrecht, den Haag, Rotterdam). This area covers about 20 % of the total surface area of the Netherlands, yet it account for a very large share of total migration flows. As we see in the left panel in Figure \@ref(fig: descriptive-data), which shows all destinations' share of total migration flows, the migration is primarily concentrated in the large cities. 
+
+If we zoom in on short-distance moves, there is an additional concentration in the Randstad area. In this paper, we define short as moves within 35 km. A previous study found that this corresponded to a cutoff where moves were predominantly motivated by house or neighbourhood [@feijten2005binnenlandse]. The right panel in Figure \@ref(fig: descriptive-data), showing the share of short-distance flows relative to total flows for each origin, shows that short-distance migration is particularly frequent in areas around large cities and less frequent in border regions or in the Frisian islands.  
+
+```{r descriptive-data, fig.cap = "Destination's share of total migration flows (left) and short-distance flows relative to total flows by origin"}
+
+tmp_dt <- rbindlist(list(## test_dt[,
+                         ##         .(variable = 'population',
+                         ##           unique(AANT_INW)),
+                         ##         by = code_dest],
+                         test_dt[,
+                                 sum(V1),
+                                 by = code_dest
+                                 ][,
+                                   .(code_dest,
+                                     variable = 'destination share',
+                                     V2 = V1 / sum(V1))
+                                   ],                         
+                         test_dt[,
+                                 .(variable = 'share short distance',
+                                   sum(V1[dist <= 35]) / sum(V1)),
+                                 by = code_orig]
+                         ## test_dt[,
+                         ##         .(variable = 'weighted average distance',
+                         ##           weighted.mean(dist_rd, V1)
+                         ##           ),
+                         ##         by = code_orig]
+                         ))
+
+plots <- list()
+for (idx in seq_along(unique(tmp_dt$variable))) {
+    vrbl <- unique(tmp_dt$variable)[idx]
+    tmp <- merge(subset(gem_nl, WATER == 'NEE'),
+                 tmp_dt[variable == vrbl],
+                 by.x = 'code', by.y = 'code_dest',
+                 all.y = T)
+    plots[[idx]] <- ggplot(tmp) +
+        geom_sf(aes(fill = V2), col = NA) +
+        theme_void() +
+        scale_fill_distiller(palette = 'Greens', name = '', direction = 1) +
+        #ggtitle(vrbl) +
+        theme(legend.position = 'bottom')
+}
+grid.arrange(plots[[1]], plots[[2]], ncol = 2)
+
+
+```
+
+## Data
+
+The data used to estimated the model are all publicly available from Statistics Netherlands. Data for the dependent variable are origin-destination migration flows between all Dutch municipalities covering the time period 2012 to 2018, and are calculated on the basis of registered individual address changes. In order to account for border changes, we use the municipality definition of 2018 and adjust data for all other years accordingly. Data on population is retrieved and processed the same way.
+
+As was clear from the previous section, he method of GWR relies on distances between origins and destinations. Yet, migration flows are registered by municipalities, meaning we have no information about the precise location of the origin or destination of individual moves. As is common in the literature[@boyle1997improving], we define origins and destinations by the population weighted centroid of the respective municipality, meaning that all outflows from one origin emanate from the same coordinates. This consequently means that distance as used in this paper refer to the distances between the the origin and destination centroids.
+
+Distance tends to be an important predictor of internal migration flows [@champion1998determinants]. In this paper we use the shortest distance on the road network instead of the somewhat simpler Euclidian distance, partly because some origins and destinations are separated by a body of water. Earlier work within the context of PEARL also suggested that a model with road distance fit the data better than models with Euclidian distance [@loke2012]. The shortest road distance between all origin-destination pairs is obtained using the Open Source Routing Engine api [@luxen-vetter-2011].
+
+```{r descriptive-statistics}
+
+tmp_dt <- data.table(variable = c('migration flows', 'road distance', 'population'),
+                     t(data.table(sp_dt@data
+                                  )[dist <= 35,
+                                    lapply(.SD,
+                                           function(x) {
+                                               list(mean(x), sd(x), min(x), max(x))
+                                           }),
+                                    .SDcols = c('V1', 'dist_rd', 'AANT_INW')]
+                       ))
+setnames(tmp_dt, c(NA, 'mean', 'sd', 'min', 'max'))
+
+kable(tmp_dt,
+      caption = 'Descriptive statistics'
+      )
+
+```
+
+# Estimation strategy
+
+In this section we describe the computational strategy of the model calibration.
+
+## Computational issues
+
+The model is calibrated using customised functions from the **GWModel** package in R [@gollini2015]. The package offerings functions for estimating different types of GWR models, including generalised GWR models with Poisson and Binomial options. The implementation of the GWR Poisson model closely follows the GWPR model as discussed in @nakaya2005geographically, where model parameters are estimated using a local maximum likelihood.
+
+In order to estimate panel data models with fixed effects with the **GWModel** package, we needed to modify the software to avoid negative degrees of freedoms. Since the usage of the discontinous kernels frequently results in a zero weight to a number of observations, we need to ensure that only relevant fixed effects are included. This can be illustrated with a following three region example, where  the weighted X matrix with fixed effects, seen from origin number 1, is represented as follows:
+
+$$
+\begin{bmatrix}
+i & j &  X & FE1 & FE2 & FE3 \\
+1 & 2 &  x_{1,2} & 1 & 0 & 0 \\
+1 & 3 &  x_{1,3} & 1 & 0 & 0 \\
+2 & 1 &  w_{1,2} x_{2,1} & 0 & w_{1,2} & 0 \\
+2 & 3 &  w_{1,2} x_{2,3} & 0 & w_{1,2} & 0 \\
+3 & 1 &  w_{1,3} x_{3,1} & 0 & 0 & w_{1,3} \\
+3 & 2 &  w_{1,3} x_{3,2} & 0 & 0 & w_{1,3}
+\end{bmatrix}
+$$
+
+Consider a weighting scheme that gives zero weight to origin number 3 ($w_{1,3} = 0$). This obviously causes the lowest two rows to contain only zeros, but it also means that all entries in the column of the fixed effect of origin 3 become zero. In fact, for the bandwidths considered in this paper, the weighted X matrix ended up consisting primarily of zeroes. By leaving out the all-zero rows and columns, thereby exploiting sparsity in the X matrix, we avoid issues related to singularity of the X matrix and we reduce the computational time of the model dramatically.
+
+## Kernel selection using time series cross validation
+
+In order to complete the fitting of the model we need to determine the weighting scheme$w_{i,j}$, which is done by specifying the type and size of the spatial kernel. Initial tests suggested that estimated parameters did not vary much between different kernel types. Out of convenience and since it is frequently used in the literature, we have chosen the bisquare kernel which can be written as 
+
+$$
+w_{i,j} =
+\begin{cases}
+   (1-(D_{i,j}/b)^{2})^{2}        & \text{if } |D_{i,j}|<b \\
+   0        & \text{otherwise}
+  \end{cases} \\
+$$
+
+Since the municipalities in the Netherlands vary quite substantially in size, we choose an adaptive kernel, meaning that the size of the kernel is determined by number of neighbouring regression points rather than distance. In order to find the optimal bandwith we follow the literature and determine it on the basis of a cross-validation exercise, thereby minimising the simulated out-of-sample forecasting errors.
+
+However, the panel data setting here requires some modifications. As in the setting of a time series, panel data also suffers from strong serial autocorrelation with individual observations. In a cross validation exercise this could invalidate the assumption of independence between test and training sample. The common workaround for this in the time series literature is the so-called evaluation over a rolling origin, where the training data is successively extended in k iterations [@tashman2000out].
+
+This procedure is illustrated in Figure \ref{fig:rolling-origin}. The movement along the x-axis shows how the origins ``roll'' forward in time, where the model is estimated on the training data (crosses) and evaluated on a hold-out-sample (dot). Since our data set spans the period 2012 to 2017 we can repeat this procedure 5 times, meaning we carry out a 5-fold cross validation. For example, the training set in fold 1 contains observations from year 2012 and its corresponding test set are observations from year 2013, training set in fold 2 contains observations from years 2012 and 2013 and its corresponding test set 2014 and so forth. Forecast perfomance is then evaluated by averaging the forecast errors over different folds.
+
+```{r rolling-origin, fig.cap = "Time series cross validation"}
+
+tmp_dt <- data.table(expand.grid(seq(2012, 2017), seq(1, 5))
+           )[,
+             .(Var1, data = c(rep('training', Var2), 'test', rep(NA, 5-Var2))),
+             by = Var2
+             ][,
+               fold := 6 - Var2
+               ]
+
+
+ggplot(tmp_dt[!is.na(data)], aes(Var1, fold)) +
+    geom_point(aes(shape = data), size = 2) +
+    theme_classic() +
+    scale_shape_manual(values=c(16, 4))+
+    scale_y_continuous(breaks = seq(1, 5), labels = seq(5, 1)) + 
+    xlab('year')
+
+```
+
+
+In the panel data setting we also need to adjust the bandwith according to the number of observations in the training set. Since the training set in fold number 2 containts twice the number of observations in fold 1, it is logical that an optimal bandwidth for fold 2 is twice the size of the bandwidth of fold number 1. If we let $b$ be the bandwidth in year 2018, then the relevant bandwith in year $t$ can be found using the following formula.
+
+$$
+B_{t} = \frac{t - 2011}{7} b
+$$
+
+
+
+The figure below shows the mean Root Mean Square Error (RMSE) and the standard error across folds, for bandwith in the interval between 1150 and 1200. The RMSE for bandwidths between 1180 and 1184 are essentially the same; as such we choose the model with bandiwth 1180. According to the formula above this results in a bandwith of 169 in the model with a single year.
+
+```{r cv-results, fig.cap = 'Mean out-of-sample RMSE and standard error'}
+
+ggplot(rbindlist(results_cv)[bw > 1150,
+                         .(mean(oos_rmse),
+                           mean(oos_rmse) + sd(oos_rmse) / sqrt(5),
+                           mean(oos_rmse) - sd(oos_rmse) / sqrt(5)
+                           ),
+                         by = bw
+                         ],
+       aes(bw, V1)) +
+    geom_ribbon(aes(ymax = V2, ymin = V3), fill = 'grey') + 
+    geom_line() +
+    theme_bw()
+
+```
+
+# Results
+
+In this section we present the estimated model. First we focus on the calibrated parameters, next we 
+
+## Parameters estimates
+
+## Prediction
+
+# Conclusion
+
+# Literature
+
+
+
